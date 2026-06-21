@@ -19,6 +19,8 @@ import { FeedbackMenuItem } from "@/components/creed/feedback-menu";
 import { BookTextIcon } from "@/components/ui/book-text";
 import { ConnectIcon } from "@/components/ui/connect";
 import { ContrastIcon, type ContrastIconHandle } from "@/components/ui/contrast";
+import { CreditCardIcon } from "@/components/ui/credit-card";
+import { BillingDialog } from "@/components/creed/billing-dialog";
 import { FileTextIcon } from "@/components/ui/file-text";
 import { LinkIcon } from "@/components/ui/link";
 import { LogoutIcon } from "@/components/ui/logout";
@@ -124,6 +126,7 @@ export function CreedShell({
   const router = useRouter();
   const { signOut, state, exportMarkdown } = useCreed();
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+  const [billingOpen, setBillingOpen] = useState(false);
   const fileActionsRef = useRef<ShellFileActions>({});
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const registerFileActions = useCallback((actions: ShellFileActions) => {
@@ -444,6 +447,15 @@ export function CreedShell({
                   <FeedbackMenuItem />
                   <ThemeToggleMenuItem />
                   <AnimatedMenuIconItem
+                    icon={CreditCardIcon}
+                    className="text-[13px]"
+                    onSelect={() => {
+                      setBillingOpen(true);
+                    }}
+                  >
+                    Billing
+                  </AnimatedMenuIconItem>
+                  <AnimatedMenuIconItem
                     icon={LogoutIcon}
                     className="text-[13px]"
                     onSelect={() => {
@@ -462,6 +474,8 @@ export function CreedShell({
           {children}
         </main>
       </div>
+
+      <BillingDialog open={billingOpen} onOpenChange={setBillingOpen} />
     </ShellActionsContext.Provider>
   );
 }

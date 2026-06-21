@@ -1,27 +1,41 @@
 import { NextResponse } from "next/server";
+import type Stripe from "stripe";
 import { requireApiAuth } from "@/lib/api-auth";
 import {
+  type BillingMode,
+  type CreedPlan,
   getEntitlement,
   getStripeClient,
-  getStripePriceId,
+  isPlanPurchasable,
+  resolvePriceId,
 } from "@/lib/stripe";
 import { getSiteUrl } from "@/lib/supabase/env";
 import { log } from "@/lib/observability";
 
-// Auth-required. Creates a one-time Checkout Session for the Hosted plan
-// keyed to the current Supabase user. We attach the user id in BOTH
-// `client_reference_id` (Stripe-native) and `metadata.supabaseUserId`
-// (read by our webhook + success-page upsert) so the payment is
-// unambiguously linked to a real account.
+// Auth-required. Creates a Checkout Session for the selected plan + billing
+// mode, keyed to the current Supabase user. The user id rides in both
+// `client_reference_id` and `metadata.supabaseUserId` (read by the webhook +
+// success-page upsert); for subscriptions it's also stamped on
+// `subscription_data.metadata` so later subscription lifecycle events can be
+// attributed without a session.
 //
-// If the user already owns Creed, returns 409 - the pricing card should
-// be showing them the "Owned" pill, but a deep-link or stale tab could
-// still POST here and we want a clear signal rather than an extra charge.
+// Guards:
+//   - lifetime owner          → 409 alreadyOwned (ownership is terminal).
+//   - active sub + subscribe  → 409 alreadySubscribed (manage instead).
+//   - active sub + lifetime   → allowed: this is the upgrade-to-own path.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+function parsePlan(value: unknown): CreedPlan {
+  return value === "company" ? "company" : "personal";
+}
+
+function parseMode(value: unknown): BillingMode {
+  return value === "lifetime" ? "lifetime" : "subscription";
+}
+
+export async function POST(request: Request) {
   const auth = await requireApiAuth();
   if (auth instanceof NextResponse) return auth;
 
@@ -33,50 +47,91 @@ export async function POST() {
     );
   }
 
+  const body = (await request.json().catch(() => ({}))) as { plan?: unknown; mode?: unknown };
+  const plan = parsePlan(body.plan);
+  const mode = parseMode(body.mode);
+
+  // Company stays "Coming Soon" until its price ids are configured. Refuse the
+  // session rather than charging the wrong price.
+  if (plan !== "personal" && !isPlanPurchasable(plan)) {
+    return NextResponse.json(
+      { error: "That plan isn't available yet." },
+      { status: 400 }
+    );
+  }
+
   try {
     const existing = await getEntitlement(user.id);
-    if (existing && existing.status === "paid") {
+    if (existing && existing.billingMode === "lifetime" && existing.status === "paid") {
       return NextResponse.json(
-        { error: "You already own Creed.", alreadyPaid: true },
+        { error: "You already own Creed.", alreadyOwned: true },
+        { status: 409 }
+      );
+    }
+    if (
+      mode === "subscription" &&
+      existing &&
+      existing.billingMode === "subscription" &&
+      ["active", "trialing", "past_due"].includes(existing.status)
+    ) {
+      return NextResponse.json(
+        { error: "You already have an active subscription.", alreadySubscribed: true },
         { status: 409 }
       );
     }
 
     const stripe = getStripeClient();
-    const priceId = getStripePriceId();
+    const priceId = await resolvePriceId(plan, mode);
     const baseUrl = getSiteUrl();
     const email = user.email.trim().toLowerCase();
+    const reuseCustomerId = existing?.stripeCustomerId ?? null;
 
-    // Idempotency key: `{userId}:{priceId}`. A user who double-clicks the
-    // Get Started button (or whose request retries on a transient network
-    // hiccup) receives the SAME Checkout Session URL rather than two new
-    // ones - Stripe deduplicates the create call within a 24h window. The
-    // key intentionally doesn't include a timestamp because that would
-    // defeat the purpose: we want repeat-creates within the same purchase
-    // attempt to collapse, not generate a fresh session each click.
-    const session = await stripe.checkout.sessions.create(
-      {
-        mode: "payment",
-        line_items: [{ price: priceId, quantity: 1 }],
-        customer_email: email,
-        client_reference_id: user.id,
-        metadata: {
-          supabaseUserId: user.id,
-          email,
-          product: "creed_hosted",
-        },
-        success_url: `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
-        // Cancelling returns to onboarding, which resumes a composed-but-unpaid
-        // user straight on their Creed preview (with "Get Creed") rather than a
-        // cold pricing page - so backing out of checkout never costs them their
-        // onboarding work.
-        cancel_url: `${baseUrl}/onboarding`,
-        // Surface promo-code support up-front so we can hand out codes later
-        // without redeploying.
-        allow_promotion_codes: true,
+    const params: Stripe.Checkout.SessionCreateParams = {
+      mode: mode === "subscription" ? "subscription" : "payment",
+      line_items: [{ price: priceId, quantity: 1 }],
+      client_reference_id: user.id,
+      metadata: {
+        supabaseUserId: user.id,
+        email,
+        product: "creed_hosted",
+        plan,
+        billingMode: mode,
       },
-      { idempotencyKey: `creed-checkout:${user.id}:${priceId}` }
-    );
+      success_url: `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+      // Cancelling returns to onboarding, which resumes a composed-but-unpaid
+      // user straight on their Creed preview rather than a cold pricing page.
+      cancel_url: `${baseUrl}/onboarding`,
+      allow_promotion_codes: true,
+    };
+
+    // Reuse the existing Stripe customer when we have one (so a subscriber's
+    // upgrade and the billing portal see a single customer). Otherwise hand
+    // Stripe the email; for one-time payments force customer creation so the
+    // portal + a future upgrade have a customer to attach to.
+    if (reuseCustomerId) {
+      params.customer = reuseCustomerId;
+    } else {
+      params.customer_email = email;
+      if (mode === "lifetime") {
+        params.customer_creation = "always";
+      }
+    }
+
+    if (mode === "subscription") {
+      params.subscription_data = {
+        metadata: { supabaseUserId: user.id, plan },
+      };
+    }
+
+    // No idempotency key: a Checkout Session is just a hosted payment page,
+    // not a charge, so creating an extra one is harmless - only the session
+    // the user actually completes matters. A static key would be worse here:
+    // Stripe caches it for 24h, so a subscriber who cancels and re-subscribes
+    // the same day would be handed their old, already-completed session URL.
+    // Rapid double-clicks are already guarded client-side (the `submitting`
+    // flag in useStripeCheckout) and server-side (the owns / active-sub checks
+    // above).
+    const session = await stripe.checkout.sessions.create(params);
 
     if (!session.url) {
       throw new Error("Stripe returned a session without a URL");
@@ -86,7 +141,7 @@ export async function POST() {
   } catch (error) {
     log.error(
       "stripe_checkout_failed",
-      { userId: user.id },
+      { userId: user.id, plan, mode },
       error instanceof Error ? error : new Error(String(error))
     );
     return NextResponse.json(

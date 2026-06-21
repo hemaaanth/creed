@@ -11,9 +11,10 @@ import { log } from "@/lib/observability";
 // and writes happen via the Supabase admin client because the webhook
 // runs without an authed user session.
 //
-// One-time payment, one product (`STRIPE_PRICE_ID`). The entitlement is
-// keyed on Supabase user_id because we sign the user in BEFORE handing
-// them to Stripe (auth-before-payment flow), eliminating email mismatch.
+// Plans are billable as a subscription or a one-time lifetime purchase, with
+// prices resolved by Stripe lookup key (see PRICE_LOOKUP_KEYS). The entitlement
+// is keyed on Supabase user_id because we sign the user in BEFORE handing them
+// to Stripe (auth-before-payment flow), eliminating email mismatch.
 
 let stripeClient: Stripe | null = null;
 
@@ -34,12 +35,76 @@ export function getStripeClient(): Stripe {
   return stripeClient;
 }
 
-export function getStripePriceId(): string {
-  const value = process.env.STRIPE_PRICE_ID?.trim();
-  if (!value) {
-    throw new Error("STRIPE_PRICE_ID is not configured.");
+// Plan + billing mode model.
+//
+//   plan:         which tier the entitlement is for.
+//   billing_mode: how it's paid - a recurring subscription, or a one-time
+//                 lifetime purchase that grants permanent ownership.
+//
+// Company is defined here so the data model and webhook are forward-ready,
+// but the pricing UI keeps Company "Coming Soon" and the checkout route
+// refuses Company sessions until the Company price ids are set.
+export type CreedPlan = "personal" | "company";
+export type BillingMode = "subscription" | "lifetime";
+
+// Prices are referenced by Stripe lookup key, not a pinned `price_...` id.
+// A lookup key is a stable, non-secret label attached to a price in the Stripe
+// dashboard; resolving by key means a price can be re-pointed (Stripe prices
+// are immutable, so a change = a new price) with zero code or env changes. The
+// same keys resolve to the right price in test vs live, since each mode has its
+// own prices carrying the same lookup keys. Company keys aren't assigned yet,
+// so Company stays "Coming Soon".
+const PRICE_LOOKUP_KEYS: Record<CreedPlan, Record<BillingMode, string | null>> = {
+  personal: {
+    subscription: "creed_personal_monthly",
+    lifetime: "creed_personal_lifetime_early",
+  },
+  company: {
+    subscription: null,
+    lifetime: null,
+  },
+};
+
+function lookupKeyFor(plan: CreedPlan, mode: BillingMode): string | null {
+  return PRICE_LOOKUP_KEYS[plan][mode];
+}
+
+// Resolved lookup_key → price_id, cached for the process lifetime. Prices are
+// effectively static; a re-point in Stripe is rare and a redeploy clears this.
+const priceIdCache = new Map<string, string>();
+
+/**
+ * Resolve the live Stripe price id for a (plan, mode) pair via its lookup key.
+ * Throws if the tier has no key configured or no active price carries it, so a
+ * misconfigured tier fails loudly at checkout rather than charging the wrong
+ * price. The lookup is cached, so steady state is one Stripe call per key.
+ */
+export async function resolvePriceId(plan: CreedPlan, mode: BillingMode): Promise<string> {
+  const key = lookupKeyFor(plan, mode);
+  if (!key) {
+    throw new Error(`No Stripe price configured for ${plan}/${mode}.`);
   }
-  return value;
+
+  const cached = priceIdCache.get(key);
+  if (cached) return cached;
+
+  const prices = await getStripeClient().prices.list({
+    lookup_keys: [key],
+    active: true,
+    limit: 1,
+  });
+  const price = prices.data[0];
+  if (!price) {
+    throw new Error(`No active Stripe price found for lookup key "${key}".`);
+  }
+
+  priceIdCache.set(key, price.id);
+  return price.id;
+}
+
+/** True when both lookup keys for a plan are configured (used to gate Company). */
+export function isPlanPurchasable(plan: CreedPlan): boolean {
+  return Boolean(lookupKeyFor(plan, "subscription") && lookupKeyFor(plan, "lifetime"));
 }
 
 export function getStripePublishableKey(): string {
@@ -78,16 +143,38 @@ export function assertWebhookSignature(
   );
 }
 
+// `paid`/`refunded` describe a lifetime purchase; the subscription states
+// mirror Stripe's. `billing_mode` disambiguates which set applies.
+export type EntitlementStatus =
+  | "paid"
+  | "refunded"
+  | "active"
+  | "trialing"
+  | "past_due"
+  | "canceled"
+  | "incomplete";
+
+// Subscription states that still grant app access. `past_due` is included
+// because Stripe keeps the subscription live through its smart retries; we
+// only revoke once Stripe gives up and emits `customer.subscription.deleted`
+// (status → canceled).
+const ACTIVE_SUB_STATUSES = new Set<EntitlementStatus>(["active", "trialing", "past_due"]);
+
 export type CreedEntitlement = {
   userId: string;
   email: string;
+  plan: CreedPlan;
+  billingMode: BillingMode;
   stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
   stripeSessionId: string;
   stripePaymentIntentId: string | null;
   stripePriceId: string;
   amountCents: number;
   currency: string;
-  status: "paid" | "refunded";
+  status: EntitlementStatus;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
   paidAt: string;
   updatedAt: string;
 };
@@ -95,13 +182,18 @@ export type CreedEntitlement = {
 type EntitlementRow = {
   user_id: string;
   email: string;
+  plan: CreedPlan;
+  billing_mode: BillingMode;
   stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
   stripe_session_id: string;
   stripe_payment_intent_id: string | null;
   stripe_price_id: string;
   amount_cents: number;
   currency: string;
-  status: "paid" | "refunded";
+  status: EntitlementStatus;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
   paid_at: string;
   updated_at: string;
 };
@@ -110,16 +202,40 @@ function rowToEntitlement(row: EntitlementRow): CreedEntitlement {
   return {
     userId: row.user_id,
     email: row.email,
+    plan: row.plan,
+    billingMode: row.billing_mode,
     stripeCustomerId: row.stripe_customer_id,
+    stripeSubscriptionId: row.stripe_subscription_id,
     stripeSessionId: row.stripe_session_id,
     stripePaymentIntentId: row.stripe_payment_intent_id,
     stripePriceId: row.stripe_price_id,
     amountCents: row.amount_cents,
     currency: row.currency,
     status: row.status,
+    currentPeriodEnd: row.current_period_end,
+    cancelAtPeriodEnd: row.cancel_at_period_end,
     paidAt: row.paid_at,
     updatedAt: row.updated_at,
   };
+}
+
+/**
+ * Does an entitlement row grant app access right now?
+ *
+ *   lifetime     → owned forever once `status = 'paid'`.
+ *   subscription → access while the subscription is active/trialing/past_due.
+ *
+ * Lifetime ownership is terminal and beats any subscription state, so a user
+ * who upgraded keeps access even if their old subscription row data lingers.
+ */
+export function entitlementGrantsAccess(row: {
+  billing_mode?: string | null;
+  status?: string | null;
+}): boolean {
+  if (row.billing_mode === "lifetime") {
+    return row.status === "paid";
+  }
+  return ACTIVE_SUB_STATUSES.has(row.status as EntitlementStatus);
 }
 
 /**
@@ -133,23 +249,26 @@ function rowToEntitlement(row: EntitlementRow): CreedEntitlement {
  * clients (the generated row types don't yet know about
  * `creed_entitlements`).
  */
-export async function hasPaidEntitlement(
+export async function hasActiveEntitlement(
   client: unknown,
   userId: string
 ): Promise<boolean> {
   const db = client as SupabaseLikeClient;
   const { data, error } = (await db
     .from("creed_entitlements")
-    .select("status")
+    .select("billing_mode, status")
     .eq("user_id", userId)
-    .maybeSingle()) as { data: { status?: string } | null; error: { message: string } | null };
+    .maybeSingle()) as {
+    data: { billing_mode?: string; status?: string } | null;
+    error: { message: string } | null;
+  };
 
-  if (error) {
-    // Treat unknown as not paid so a transient DB blip doesn't grant
-    // access to an unpaid user. The next request will re-check.
+  if (error || !data) {
+    // Treat unknown as no access so a transient DB blip doesn't grant
+    // entry to an unentitled user. The next request will re-check.
     return false;
   }
-  return data?.status === "paid";
+  return entitlementGrantsAccess(data);
 }
 
 /**
@@ -181,6 +300,53 @@ export async function getEntitlement(userId: string): Promise<CreedEntitlement |
  * Returns the resulting entitlement, or `null` if the session payload
  * is missing the fields we need to attribute the payment to a user.
  */
+function mapStripeSubStatus(status: Stripe.Subscription.Status): EntitlementStatus {
+  switch (status) {
+    case "active":
+      return "active";
+    case "trialing":
+      return "trialing";
+    case "past_due":
+      return "past_due";
+    case "incomplete":
+      return "incomplete";
+    // canceled, unpaid, incomplete_expired, paused → no access.
+    default:
+      return "canceled";
+  }
+}
+
+function unixToIso(seconds: number | null | undefined): string | null {
+  if (!seconds || seconds <= 0) return null;
+  return new Date(seconds * 1000).toISOString();
+}
+
+// A Checkout subscription exposes period info on the subscription object,
+// not the session - and the typed SDK has churned on where
+// `current_period_end` lives, so read it defensively.
+function readPeriodEnd(subscription: Stripe.Subscription): string | null {
+  const sub = subscription as unknown as {
+    current_period_end?: number;
+    items?: { data?: Array<{ current_period_end?: number }> };
+  };
+  const top = unixToIso(sub.current_period_end);
+  if (top) return top;
+  return unixToIso(sub.items?.data?.[0]?.current_period_end);
+}
+
+/**
+ * Idempotent upsert from a completed Checkout Session. Handles BOTH billing
+ * modes:
+ *
+ *   payment (lifetime)   → status 'paid', billing_mode 'lifetime'. If the
+ *                          user had an active subscription, it's canceled
+ *                          (you can't own it and keep paying monthly).
+ *   subscription         → status mirrors the live Stripe subscription,
+ *                          billing_mode 'subscription'.
+ *
+ * Returns the resulting entitlement, or `null` if the session can't be
+ * attributed to a user / isn't actually paid yet.
+ */
 export async function upsertEntitlementFromSession(
   session: Stripe.Checkout.Session
 ): Promise<CreedEntitlement | null> {
@@ -188,17 +354,27 @@ export async function upsertEntitlementFromSession(
   if (!userId || typeof userId !== "string") {
     return null;
   }
+
+  const mode: BillingMode = session.mode === "subscription" ? "subscription" : "lifetime";
+
+  // A subscription session is "done" at payment_status 'paid' (first invoice
+  // settled). A one-time session is the same. Anything else isn't entitled.
   if (session.payment_status !== "paid") {
     return null;
   }
 
-  const priceId = getStripePriceId();
+  const plan: CreedPlan = session.metadata?.plan === "company" ? "company" : "personal";
+  const priceId = await resolvePriceId(plan, mode);
   const customerId =
     typeof session.customer === "string" ? session.customer : session.customer?.id ?? null;
   const paymentIntentId =
     typeof session.payment_intent === "string"
       ? session.payment_intent
       : session.payment_intent?.id ?? null;
+  const subscriptionId =
+    typeof session.subscription === "string"
+      ? session.subscription
+      : session.subscription?.id ?? null;
   // Normalise email so case differences between Stripe and Google don't
   // accidentally surface elsewhere. The auth path is keyed by user_id so
   // this string is only ever displayed / used for auditing.
@@ -208,6 +384,19 @@ export async function upsertEntitlementFromSession(
   const currency = (session.currency ?? "usd").toLowerCase();
   const now = new Date().toISOString();
 
+  let status: EntitlementStatus = "paid";
+  let currentPeriodEnd: string | null = null;
+  let cancelAtPeriodEnd = false;
+
+  if (mode === "subscription" && subscriptionId) {
+    // Pull the live subscription so the row reflects real status + renewal,
+    // not just "a session completed".
+    const subscription = await getStripeClient().subscriptions.retrieve(subscriptionId);
+    status = mapStripeSubStatus(subscription.status);
+    currentPeriodEnd = readPeriodEnd(subscription);
+    cancelAtPeriodEnd = Boolean(subscription.cancel_at_period_end);
+  }
+
   const admin = getSupabaseAdminClient() as unknown as SupabaseLikeClient;
   const { data, error } = (await admin
     .from("creed_entitlements")
@@ -215,13 +404,18 @@ export async function upsertEntitlementFromSession(
       {
         user_id: userId,
         email,
+        plan,
+        billing_mode: mode,
         stripe_customer_id: customerId,
+        stripe_subscription_id: subscriptionId,
         stripe_session_id: session.id,
         stripe_payment_intent_id: paymentIntentId,
         stripe_price_id: priceId,
         amount_cents: amount,
         currency,
-        status: "paid",
+        status,
+        current_period_end: currentPeriodEnd,
+        cancel_at_period_end: cancelAtPeriodEnd,
         updated_at: now,
       },
       { onConflict: "user_id" }
@@ -235,7 +429,101 @@ export async function upsertEntitlementFromSession(
   if (!data) {
     throw new Error("Stripe entitlement upsert returned no row.");
   }
+
+  // Ownership is terminal: buying lifetime cancels any active subscription so
+  // the user is never charged again. Best-effort - a failure here must not
+  // unwind the entitlement they just paid for.
+  if (mode === "lifetime" && customerId) {
+    await cancelActiveSubscriptionsForCustomer(customerId).catch((cancelError) => {
+      log.warn("stripe_cancel_subscription_after_lifetime_failed", {
+        userId,
+        customerId,
+        error: cancelError instanceof Error ? cancelError.message : String(cancelError),
+      });
+    });
+  }
+
   return rowToEntitlement(data);
+}
+
+/**
+ * Cancel every still-live subscription on a customer. Called when a user
+ * upgrades to lifetime. Idempotent: subscriptions already ending are skipped.
+ */
+export async function cancelActiveSubscriptionsForCustomer(customerId: string): Promise<void> {
+  const stripe = getStripeClient();
+  const subs = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 100 });
+  for (const sub of subs.data) {
+    if (sub.status === "canceled" || sub.status === "incomplete_expired") continue;
+    await stripe.subscriptions.cancel(sub.id);
+  }
+}
+
+/**
+ * Keep an entitlement in sync with a Stripe subscription lifecycle event
+ * (`customer.subscription.updated` / `.deleted`). Looks the user up via the
+ * subscription metadata we stamped at checkout, falling back to the customer
+ * id on the existing row.
+ *
+ * Guard: a lifetime owner is never downgraded by a subscription event. After
+ * an upgrade, Stripe still emits a `.deleted` for the canceled subscription;
+ * applying it would wrongly revoke a paid-for-life user.
+ */
+export async function syncSubscriptionFromStripe(
+  subscription: Stripe.Subscription
+): Promise<boolean> {
+  const admin = getSupabaseAdminClient() as unknown as SupabaseLikeClient;
+  const metaUserId =
+    typeof subscription.metadata?.supabaseUserId === "string"
+      ? subscription.metadata.supabaseUserId
+      : null;
+  const customerId =
+    typeof subscription.customer === "string"
+      ? subscription.customer
+      : subscription.customer?.id ?? null;
+
+  // Resolve the owning row: prefer the stamped user id, else match the customer.
+  let row: EntitlementRow | null = null;
+  if (metaUserId) {
+    const { data } = (await admin
+      .from("creed_entitlements")
+      .select("*")
+      .eq("user_id", metaUserId)
+      .maybeSingle()) as { data: EntitlementRow | null };
+    row = data;
+  }
+  if (!row && customerId) {
+    const { data } = (await admin
+      .from("creed_entitlements")
+      .select("*")
+      .eq("stripe_customer_id", customerId)
+      .maybeSingle()) as { data: EntitlementRow | null };
+    row = data;
+  }
+  if (!row) {
+    return false;
+  }
+  if (row.billing_mode === "lifetime") {
+    // Owned outright - ignore subscription churn entirely.
+    return false;
+  }
+
+  const status = mapStripeSubStatus(subscription.status);
+  const { error } = await admin
+    .from("creed_entitlements")
+    .update({
+      stripe_subscription_id: subscription.id,
+      status,
+      current_period_end: readPeriodEnd(subscription),
+      cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", row.user_id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  return true;
 }
 
 /**

@@ -79,14 +79,18 @@ type Confirmation = { email: string; kind: "signup" | "reset" };
 export function AuthScreen({
   mode,
   configured = true,
+  nextPath = "/",
 }: {
   mode: AuthMode;
   configured?: boolean;
+  // Where to land after a successful auth (e.g. back to /authorize for an MCP
+  // connect). Defaults to the root router.
+  nextPath?: string;
 }) {
   const t = copy[mode];
   const isSignup = mode === "signup";
 
-  const { signIn: oauthSignIn, pendingProvider } = useOAuthSignIn(configured);
+  const { signIn: oauthSignIn, pendingProvider } = useOAuthSignIn(configured, nextPath);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -125,20 +129,20 @@ export function AuthScreen({
     let active = true;
     const checkSession = async () => {
       const { data } = await supabase.auth.getSession();
-      if (active && data.session) window.location.assign("/");
+      if (active && data.session) window.location.assign(nextPath);
     };
     const intervalId = window.setInterval(() => void checkSession(), 3000);
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event: unknown, session: unknown) => {
-      if (active && session) window.location.assign("/");
+      if (active && session) window.location.assign(nextPath);
     });
     return () => {
       active = false;
       window.clearInterval(intervalId);
       subscription.unsubscribe();
     };
-  }, [confirmation]);
+  }, [confirmation, nextPath]);
 
   const busy = submitting || pendingProvider !== null;
 
@@ -187,14 +191,16 @@ export function AuthScreen({
           return;
         }
         // Full navigation so server components pick up the new session.
-        window.location.assign("/");
+        window.location.assign(nextPath);
         return;
       }
 
       const { data, error } = await supabase.auth.signUp({
         email: trimmedEmail,
         password,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/` },
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`,
+        },
       });
       if (error) {
         toast.error(authErrorMessage(error.message, mode));
@@ -202,7 +208,7 @@ export function AuthScreen({
       }
       // Confirmation off -> we get a session straight away.
       if (data.session) {
-        window.location.assign("/");
+        window.location.assign(nextPath);
         return;
       }
       // Supabase returns a user with no identities for an already-registered

@@ -4,6 +4,7 @@ import {
   assertWebhookSignature,
   creditBalanceFromPaymentIntent,
   getStripeWebhookSecret,
+  syncSubscriptionFromStripe,
   upsertEntitlementFromSession,
 } from "@/lib/stripe";
 import { log } from "@/lib/observability";
@@ -74,6 +75,24 @@ export async function POST(request: Request) {
         userId: entitlement.userId,
       });
       return NextResponse.json({ ok: true, applied: true });
+    }
+
+    if (
+      event.type === "customer.subscription.updated" ||
+      event.type === "customer.subscription.deleted"
+    ) {
+      // Keep the entitlement in step with the subscription's lifecycle:
+      // renewals, cancellations, past_due, and final deletion. Lifetime
+      // owners are ignored inside the sync (ownership is terminal).
+      const subscription = event.data.object as Stripe.Subscription;
+      const applied = await syncSubscriptionFromStripe(subscription);
+      log.info("stripe_webhook_subscription_synced", {
+        eventId: event.id,
+        type: event.type,
+        subscriptionId: subscription.id,
+        applied,
+      });
+      return NextResponse.json({ ok: true, applied });
     }
 
     if (event.type === "payment_intent.succeeded") {

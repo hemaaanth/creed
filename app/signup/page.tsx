@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { AuthScreen } from "@/components/auth/auth-screen";
+import { sanitizeNextPath } from "@/lib/safe-next";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -9,19 +10,24 @@ export const metadata: Metadata = {
   description: "Create your Creed account.",
 };
 
-export default async function SignupPage() {
+export default async function SignupPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string | string[] }>;
+}) {
   const configured = isSupabaseConfigured();
+  const nextPath = sanitizeNextPath((await searchParams).next);
 
-  // Already signed in? Send them into the app rather than showing the form.
+  // Already signed in? Send them on to `next` (or the app) rather than the form.
   if (configured) {
     const supabase = await createSupabaseServerClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (user) {
-      redirect("/");
+      redirect(nextPath);
     }
   }
 
-  return <AuthScreen mode="signup" configured={configured} />;
+  return <AuthScreen mode="signup" configured={configured} nextPath={nextPath} />;
 }

@@ -6,7 +6,7 @@ import {
   isAllowedRedirectUri,
   issueAuthorizationCode,
 } from "@/lib/oauth";
-import { hasPaidEntitlement } from "@/lib/stripe";
+import { hasActiveEntitlement } from "@/lib/stripe";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 // Handles the Allow / Deny POST from the consent screen. The user is
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
   // checks too, but never trust the page). We do NOT require a finished Creed -
   // a paid user can connect before composing content; onboarding itself uses
   // copy-paste, not MCP.
-  const paid = await hasPaidEntitlement(supabase, user.id);
+  const paid = await hasActiveEntitlement(supabase, user.id);
   if (!paid) {
     return badRequest("This account is not set up to connect agents yet.");
   }

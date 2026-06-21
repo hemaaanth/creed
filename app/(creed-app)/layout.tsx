@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { AppShellLayout } from "@/components/creed/app-shell-layout";
 import { hasPersistedCreed } from "@/lib/creed-backend";
 import { isSupabaseTableMissingError } from "@/lib/creed-backend-errors";
-import { hasPaidEntitlement } from "@/lib/stripe";
+import { hasActiveEntitlement } from "@/lib/stripe";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 
@@ -39,7 +39,7 @@ export default async function CreedAppLayout({ children }: { children: ReactNode
     redirect("/pricing");
   }
 
-  const paid = await hasPaidEntitlement(supabase, user.id);
+  const paid = await hasActiveEntitlement(supabase, user.id);
   if (!paid) {
     redirect("/onboarding");
   }

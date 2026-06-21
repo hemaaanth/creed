@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { CreedWordmark, IntegrationGlyph } from "@/components/creed/brand";
-import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { Button } from "@/components/ui/button";
 import { getAgentIconKind } from "@/lib/agent-icon";
 import { getOAuthClient, isAllowedRedirectUri } from "@/lib/oauth";
-import { hasPaidEntitlement } from "@/lib/stripe";
+import { hasActiveEntitlement } from "@/lib/stripe";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -124,7 +123,12 @@ export default async function AuthorizePage({
           body={`Sign in to your Creed account to let ${client.clientName} read and update your Creed.`}
         />
         <div className="mt-6 flex justify-center">
-          <GoogleSignInButton redirectTo={returnTo} />
+          <Link
+            href={`/login?next=${encodeURIComponent(returnTo)}`}
+            className="inline-flex h-10 items-center justify-center rounded-md bg-[var(--creed-text-primary)] px-5 text-[14px] font-medium text-[var(--creed-button-primary-fg)] transition-colors hover:bg-[var(--creed-button-primary-hover)]"
+          >
+            Log in
+          </Link>
         </div>
       </Shell>
     );
@@ -137,7 +141,7 @@ export default async function AuthorizePage({
   // is the bar; onboarding composes via copy-paste, not over MCP. Unpaid users
   // get the same agent-specific consent layout, just with a single "Go to
   // Creed" CTA instead of Allow / Deny.
-  const paid = await hasPaidEntitlement(supabase, user.id);
+  const paid = await hasActiveEntitlement(supabase, user.id);
   if (!paid) {
     return (
       <Shell>

@@ -33,7 +33,7 @@ export function GoogleSignInButton({
   return (
     <Button
       className={cn(
-        "rounded-md bg-[var(--creed-text-primary)] px-5 text-white hover:bg-[#2B2B28]",
+        "rounded-md bg-[var(--creed-text-primary)] px-5 text-[var(--creed-button-primary-fg)] hover:bg-[var(--creed-button-primary-hover)]",
         className
       )}
       onClick={() => void signIn("google")}

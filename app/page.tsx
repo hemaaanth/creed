@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { BackendSetupScreen } from "@/components/auth/backend-setup-screen";
 import { hasPersistedCreed } from "@/lib/creed-backend";
 import { isSupabaseTableMissingError } from "@/lib/creed-backend-errors";
-import { hasPaidEntitlement } from "@/lib/stripe";
+import { hasActiveEntitlement } from "@/lib/stripe";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { log } from "@/lib/observability";
@@ -46,7 +46,7 @@ export default async function Home() {
   // compose, preview, then "Get Creed") rather than into the app. The
   // (creed-app) layout also gates /file etc, but short-circuiting here
   // avoids the redundant section-probe round-trip for unpaid users.
-  const paid = await hasPaidEntitlement(supabase, user.id);
+  const paid = await hasActiveEntitlement(supabase, user.id);
   if (!paid) {
     redirect("/onboarding");
   }

@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { OnboardingScreen } from "@/components/creed/onboarding-screen";
 import { loadCreedState } from "@/lib/creed-backend";
 import { isSupabaseTableMissingError } from "@/lib/creed-backend-errors";
-import { hasPaidEntitlement } from "@/lib/stripe";
+import { hasActiveEntitlement } from "@/lib/stripe";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 
@@ -10,8 +10,9 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 // signed in can run it (answer questions, build with their assistant via a
 // copy-paste prompt, preview); the paywall is the hosted app, not onboarding.
 // We pass two signals to the screen:
-//   - paid: switches the final button between "Get Creed" (checkout) and
-//     "Go to my Creed" (straight into the app).
+//   - paid: switches the final CTA between the checkout path ("Start for
+//     $7/mo" + an "or own it for $49" link) and "Go to my Creed" (straight
+//     into the app) once they already have access.
 //   - initialStage: resume point. A composed Creed resumes on the preview; a
 //     claimed-but-not-composed seed resumes on the prompt step; otherwise the
 //     screen starts at step 0.
@@ -31,7 +32,7 @@ export default async function OnboardingPage() {
       redirect("/home");
     }
 
-    paid = await hasPaidEntitlement(supabase, user.id);
+    paid = await hasActiveEntitlement(supabase, user.id);
 
     // loadCreedState is cache()-wrapped, so this reuses the identical call the
     // root layout already made this request. "Composed" == any section last
