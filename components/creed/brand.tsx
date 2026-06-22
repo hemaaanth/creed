@@ -12,6 +12,8 @@ const codexIcon = "/assets/agents/codex.svg";
 const cursorIcon = "/assets/agents/cursor.svg";
 const customAgentIcon = "/assets/agents/customagent.svg";
 const devinIcon = "/assets/agents/devin.svg";
+const replitIcon = "/assets/agents/replit.svg";
+const whirlIcon = "/assets/agents/whirl.svg";
 const grokIcon = "/assets/agents/grok.svg";
 const hermesIcon = "/assets/agents/hermes.svg";
 const logo = "/assets/brand/logo.svg";
@@ -69,7 +71,9 @@ type GlyphKind =
   | "codex"
   | "chatgpt"
   | "cursor"
+  | "replit"
   | "devin"
+  | "whirl"
   | "grok"
   | "v0"
   | "opencode"
@@ -95,7 +99,9 @@ const glyphBrandAssets = {
   codex: { src: codexIcon, imageClassName: "scale-[0.92]" },
   chatgpt: { src: chatgptIcon, imageClassName: "scale-[0.9]" },
   cursor: { src: cursorIcon, imageClassName: "scale-[0.9]" },
+  replit: { src: replitIcon, imageClassName: "scale-[0.9]" },
   devin: { src: devinIcon, imageClassName: "scale-[0.9]" },
+  whirl: { src: whirlIcon, imageClassName: "scale-[0.9]" },
   grok: { src: grokIcon, imageClassName: "scale-[0.9]" },
   v0: { src: v0Icon, imageClassName: "scale-[0.9]" },
   opencode: { src: openCodeIcon, imageClassName: "scale-[0.9]" },

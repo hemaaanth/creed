@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, LoaderCircle } from "lucide-react";
+import { ArrowLeft, LoaderCircle, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { AnimatedCheckmark } from "@/components/ui/animated-checkmark";
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { CreedWordmark, IntegrationGlyph } from "@/components/creed/brand";
 import { useCreed } from "@/components/creed/creed-provider";
+import { AnimatedIconButton } from "@/components/creed/animated-icon-action";
 import { RichTextEditor } from "@/components/creed/rich-text-editor";
 import { useStripeCheckout } from "@/components/marketing/use-stripe-checkout";
 import {
@@ -632,7 +633,7 @@ export function OnboardingScreen({
                       </AnimatedBlock>
                       <AnimatedBlock index={2}>
                         <div className="mx-auto mt-9 flex w-full max-w-lg flex-col rounded-[14px] border border-[var(--creed-border)] bg-[var(--creed-surface)] p-5 text-left">
-                          <div className="flex flex-wrap items-center gap-4">
+                          <div className="flex flex-wrap items-center gap-2.5">
                             {(
                               [
                                 "chatgpt",
@@ -640,26 +641,35 @@ export function OnboardingScreen({
                                 "claudecode",
                                 "codex",
                                 "cursor",
+                                "replit",
                                 "grok",
                                 "hermes",
                                 "openclaw",
+                                "opencode",
                               ] as AgentIconKind[]
                             ).map((kind) => (
                               <IntegrationGlyph
                                 key={kind}
                                 kind={kind}
                                 framed={false}
-                                className="h-10 w-10 shrink-0"
+                                className="h-8 w-8 shrink-0"
+                                assetClassName="h-8 w-8"
                               />
                             ))}
+                            <Plus
+                              strokeWidth={2}
+                              className="h-8 w-8 shrink-0 p-[7px] text-[var(--creed-text-primary)]"
+                            />
                           </div>
                           <p className="mt-4 text-[13px] leading-6 text-[var(--creed-text-secondary)]">
                             Paste this prompt into any AI. It replies with a markdown Creed you paste
-                            back into Creed.
+                            back into Creed on the next page.
                           </p>
                           <div className="mt-4">
-                            <Button
+                            <AnimatedIconButton
                               type="button"
+                              icon={CopyIcon}
+                              showIcon={!promptCopied}
                               className="creed-copy-cycle min-w-[116px] justify-center rounded-md px-4 text-white"
                               onClick={() => void handleCopyPrompt()}
                             >
@@ -669,12 +679,9 @@ export function OnboardingScreen({
                                   Copied
                                 </>
                               ) : (
-                                <>
-                                  <CopyIcon className="h-4 w-4" size={16} />
-                                  Copy prompt
-                                </>
+                                "Copy prompt"
                               )}
-                            </Button>
+                            </AnimatedIconButton>
                           </div>
                         </div>
                       </AnimatedBlock>
@@ -695,7 +702,12 @@ export function OnboardingScreen({
                             setPasted(event.target.value);
                             if (pasteError) setPasteError(null);
                           }}
-                          className="min-h-[220px] max-h-[44vh] resize-none overflow-y-auto rounded-2xl border-[var(--creed-border)] px-4 py-4 font-mono text-[14px] leading-7"
+                          className={cn(
+                            "min-h-[220px] max-h-[44vh] resize-none overflow-y-auto rounded-2xl px-4 py-4 font-mono text-[14px] leading-7",
+                            pasteError
+                              ? "border-[#DC2626] focus-visible:border-[#DC2626] focus-visible:ring-[#DC2626]/15"
+                              : "border-[var(--creed-border)]"
+                          )}
                           placeholder={"## Identity\n\nPaste the full markdown your assistant produced here."}
                         />
                         {pasteError ? (

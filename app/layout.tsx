@@ -52,11 +52,19 @@ const ebGaramond = EB_Garamond({
 //   future `app/icon.png` doesn't silently take over and the search-
 //   result favicon Google reads stays the same one users see in tabs.
 const SITE_DESCRIPTION =
-  "The canonical markdown file for your personal context.";
+  "Creed is one personal context file that every AI reads before it answers. Written once, kept current by your agents, and portable across every tool you use.";
 
+// `title.default` is the brand title used by any page that doesn't set its
+// own (the root redirect and /home both fall back to it). `title.template`
+// suffixes per-page titles, so individual pages set a bare title ("Pricing")
+// and get "Pricing | Creed" automatically. A page that wants an exact title
+// uses `title: { absolute: "..." }`.
 export const metadata: Metadata = {
   metadataBase: new URL(getSiteUrl()),
-  title: "Creed",
+  title: {
+    default: "Creed - the personal context file every AI reads",
+    template: "%s | Creed",
+  },
   description: SITE_DESCRIPTION,
   icons: {
     icon: "/favicon.ico",
@@ -64,7 +72,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: "Creed",
-    title: "Creed",
+    title: "Creed - the personal context file every AI reads",
     description: SITE_DESCRIPTION,
     images: [
       {
@@ -74,6 +82,12 @@ export const metadata: Metadata = {
         alt: "Creed. A universal AI context file.",
       },
     ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Creed - the personal context file every AI reads",
+    description: SITE_DESCRIPTION,
+    images: ["/search-preview.png"],
   },
 };
 

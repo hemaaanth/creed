@@ -5,9 +5,13 @@ import { getSiteUrl } from "@/lib/supabase/env";
 // entitlement gate (/file, /onboarding, /connections, /settings) would
 // redirect to /pricing for unauthenticated crawlers, so listing them is
 // pointless and pollutes search results.
+//
+// The root `/` is deliberately absent: it 307-redirects to /home for
+// signed-out visitors, so /home is the one canonical landing URL. Listing
+// both points crawlers at a redirect and splits ranking signals.
 const PUBLIC_PATHS = [
-  { path: "/", changeFrequency: "weekly" as const, priority: 1.0 },
-  { path: "/home", changeFrequency: "weekly" as const, priority: 0.9 },
+  { path: "/home", changeFrequency: "weekly" as const, priority: 1.0 },
+  { path: "/context", changeFrequency: "monthly" as const, priority: 0.8 },
   { path: "/pricing", changeFrequency: "monthly" as const, priority: 0.9 },
   { path: "/docs", changeFrequency: "monthly" as const, priority: 0.7 },
   { path: "/privacy", changeFrequency: "yearly" as const, priority: 0.3 },

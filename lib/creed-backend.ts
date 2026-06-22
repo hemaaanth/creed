@@ -170,6 +170,8 @@ const KNOWN_CONNECTIONS = [
   "chatgpt",
   "cursor",
   "devin",
+  "replit",
+  "whirl",
   "grok",
   "v0",
   "opencode",
@@ -712,6 +714,22 @@ function buildConnectionDefinitions() {
         description: "Add Creed to Devin from the MCP Marketplace.",
         connectHint:
           "In Devin, open Settings > MCP Marketplace, add your own MCP with Transport HTTP and the URL above, set Authentication to OAuth, then authorize.",
+      },
+      {
+        id: "replit",
+        name: "Replit",
+        icon: "replit",
+        description: "Add Creed to Replit as a remote MCP server.",
+        connectHint:
+          "In Replit, open the Agent's MCP settings, add a remote MCP server with the URL above, and authorize Creed with OAuth.",
+      },
+      {
+        id: "whirl",
+        name: "Whirl",
+        icon: "whirl",
+        description: "Add Creed to Whirl as a custom MCP connection.",
+        connectHint:
+          "In Whirl, open Settings and add a custom MCP server with the URL above, then authorize Creed with OAuth.",
       },
       {
         id: "v0",

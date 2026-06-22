@@ -13,10 +13,13 @@ import { cn } from "@/lib/utils";
 function getAgentButtonClasses(connectionId: string) {
   switch (connectionId) {
     case "codex":
+    case "whirl":
       return "bg-[#2563EB] text-white transition-colors hover:bg-[#1D4ED8]";
     case "claude":
     case "claudecode":
       return "bg-[#FF6200] text-white hover:bg-[#E65A00]";
+    case "replit":
+      return "bg-[#F26207] text-white transition-colors hover:bg-[#D65606]";
     case "openclaw":
       return "bg-[#FF0000] text-white hover:bg-[#E00000]";
     case "hermes":

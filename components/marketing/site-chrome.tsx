@@ -429,7 +429,7 @@ export function MarketingFooter() {
         <div className="grid gap-8 sm:grid-cols-3">
           <FooterColumn title="Product" links={["Pricing"]} />
           <FooterColumn title="Legal" links={["Privacy", "Terms", "Stack"]} />
-          <FooterColumn title="Resources" links={["Docs", "Contact"]} />
+          <FooterColumn title="Resources" links={["Docs", "Context", "Contact"]} />
         </div>
       </div>
 
@@ -539,6 +539,8 @@ function FooterColumn({
                     ? "/stack"
                     : link === "Docs"
                       ? "/docs"
+                      : link === "Context"
+                        ? "/context"
                   : link === "Contact"
                     ? CONTACT_MAILTO
                     : "#"
