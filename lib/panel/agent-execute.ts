@@ -153,8 +153,11 @@ export async function executeAgentActions({
       log.error("agent_proposal_insert_failed", { userId: user.id, message: proposalError.message });
       return null;
     }
-    await activityTable
-      .upsert(
+    // Activity is best-effort. The Supabase builder is a thenable, not a real
+    // Promise, so `.catch()` on it throws "catch is not a function" - await it
+    // inside try/catch instead, or the whole run fails after the edit lands.
+    try {
+      await activityTable.upsert(
         {
           id: `activity-${proposalId}`,
           user_id: user.id,
@@ -175,8 +178,10 @@ export async function executeAgentActions({
           created_at: rowNow,
         },
         { onConflict: "id" }
-      )
-      .catch(() => null);
+      );
+    } catch {
+      // ignore
+    }
     return { kind: "proposal", proposalId, sectionId: params.sectionId, label: "" };
   }
 
