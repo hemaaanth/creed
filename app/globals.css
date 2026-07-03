@@ -827,8 +827,35 @@
   border-color: var(--creed-border);
 }
 
-/* Selection highlight reads better against the dark canvas. */
+/* Text selection: a saturated brand blue in both themes. Light mode keeps the
+   dark foreground so text stays legible under the tint; dark mode brightens the
+   selected text against the deeper wash. */
+::selection {
+  background: rgba(37, 99, 235, 0.24);
+}
+
 .dark ::selection {
-  background: rgba(96, 165, 250, 0.28);
+  background: rgba(59, 130, 246, 0.42);
   color: #f5f5f0;
+}
+
+/* Find-and-replace match highlights (CSS Custom Highlight API - painted by
+   components/creed/find-replace.tsx without touching the editor DOM). All
+   matches get a soft accent wash; the active match steps up in intensity. */
+::highlight(creed-find) {
+  background-color: rgba(37, 99, 235, 0.16);
+}
+
+::highlight(creed-find-active) {
+  background-color: rgba(37, 99, 235, 0.42);
+  color: #ffffff;
+}
+
+.dark ::highlight(creed-find) {
+  background-color: rgba(96, 165, 250, 0.22);
+}
+
+.dark ::highlight(creed-find-active) {
+  background-color: rgba(96, 165, 250, 0.45);
+  color: #0e0e0d;
 }

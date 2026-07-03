@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentType,
   type ReactNode,
@@ -47,6 +48,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import {
+  consumeSettingsPanelIntent,
+  SETTINGS_PANEL_INTENT_EVENT,
+} from "@/lib/panel/settings-intent";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   ChartContainer,
@@ -418,6 +423,86 @@ export function SettingsScreen() {
       cancelled = true;
     };
   }, [usageRange, aiSettings.aiMode, aiSettings.keyStatus]);
+
+  // The Panel intent consumer below runs in a mount-once effect, so it reads
+  // the mode-change handler through a ref that tracks the latest render (the
+  // handler closes over aiSettings and would otherwise be stale).
+  const panelModeChangeRef = useRef<(mode: "credits" | "byok") => void>(() => {});
+  useEffect(() => {
+    panelModeChangeRef.current = (mode: "credits" | "byok") => void handleModeChange(mode);
+  });
+
+  // Panel → Settings intents: scroll to a section, set the usage range or
+  // payment mode, open a dialog. Consumed once on mount (arriving via
+  // navigation) and again on the intent event (already on /settings, so no
+  // remount happens). Mirrors the file screen's nav-intent retry loop: the
+  // section list renders in one pass, but the rAF retry keeps this robust if
+  // that ever changes.
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    let cancelled = false;
+    let frameId = 0;
+
+    const consume = () => {
+      const intent = consumeSettingsPanelIntent();
+      if (!intent || cancelled) {
+        return;
+      }
+      if (intent.aiMode) {
+        panelModeChangeRef.current(intent.aiMode);
+      }
+      if (intent.usageRange) {
+        setUsageRange(intent.usageRange);
+      }
+      if (intent.openDialog === "add-credits") {
+        setAddCreditsOpen(true);
+      } else if (intent.openDialog === "credits-history") {
+        setHistoryOpen(true);
+      }
+      const key = intent.scrollTo;
+      if (!key) {
+        return;
+      }
+
+      let attempts = 0;
+      const tryScroll = () => {
+        if (cancelled) {
+          return;
+        }
+        const element = document.getElementById(`settings-${key}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "start" });
+          // A soft pulse so the eye lands on the right section after the jump.
+          element.animate(
+            [
+              { backgroundColor: "var(--creed-surface-raised)", borderRadius: "12px", offset: 0.15 },
+              { backgroundColor: "transparent", borderRadius: "12px" },
+            ],
+            { duration: 1100, easing: "ease-out" }
+          );
+          return;
+        }
+        attempts += 1;
+        if (attempts < 24) {
+          frameId = window.requestAnimationFrame(tryScroll);
+        }
+      };
+      frameId = window.requestAnimationFrame(tryScroll);
+    };
+
+    const timeoutId = window.setTimeout(consume, 120);
+    window.addEventListener(SETTINGS_PANEL_INTENT_EVENT, consume);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener(SETTINGS_PANEL_INTENT_EVENT, consume);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -818,7 +903,7 @@ export function SettingsScreen() {
             Settings
           </h1>
 
-          <section className="mt-10">
+          <section id="settings-profile" className="mt-10 scroll-mt-6">
             <h2 className="text-[16px] font-medium text-[var(--creed-text-primary)]">
               Profile
             </h2>
@@ -851,7 +936,7 @@ export function SettingsScreen() {
 
           <Separator className="my-10 bg-[var(--creed-border)]" />
 
-          <section>
+          <section id="settings-agent-edits" className="scroll-mt-6">
             <h2 className="text-[16px] font-medium text-[var(--creed-text-primary)]">
               Agent edit behaviour
             </h2>
@@ -939,7 +1024,7 @@ export function SettingsScreen() {
 
           <Separator className="my-10 bg-[var(--creed-border)]" />
 
-          <section>
+          <section id="settings-integrations" className="scroll-mt-6">
             <h2 className="text-[16px] font-medium text-[var(--creed-text-primary)]">
               Integrations
             </h2>
@@ -1017,7 +1102,7 @@ export function SettingsScreen() {
 
           <Separator className="my-10 bg-[var(--creed-border)]" />
 
-          <section>
+          <section id="settings-model-usage" className="scroll-mt-6">
             <div className="flex items-center justify-between gap-4">
               <h2 className="text-[16px] font-medium text-[var(--creed-text-primary)]">
                 Model usage
@@ -1214,7 +1299,7 @@ export function SettingsScreen() {
 
           <Separator className="my-10 bg-[var(--creed-border)]" />
 
-          <section>
+          <section id="settings-version-control" className="scroll-mt-6">
             <h2 className="text-[16px] font-medium text-[var(--creed-text-primary)]">
               Version control
             </h2>
@@ -1344,7 +1429,7 @@ export function SettingsScreen() {
 
           <Separator className="my-10 bg-[var(--creed-border)]" />
 
-          <section>
+          <section id="settings-archived" className="scroll-mt-6">
             <h2 className="text-[16px] font-medium text-[var(--creed-text-primary)]">
               Archived
             </h2>
@@ -1439,7 +1524,7 @@ export function SettingsScreen() {
 
           <Separator className="my-10 bg-[var(--creed-border)]" />
 
-          <section>
+          <section id="settings-data" className="scroll-mt-6">
             <h2 className="text-[16px] font-medium text-[var(--creed-text-primary)]">
               Data
             </h2>
@@ -1499,7 +1584,7 @@ export function SettingsScreen() {
 
           <Separator className="my-10 bg-[var(--creed-border)]" />
 
-          <section>
+          <section id="settings-danger" className="scroll-mt-6">
             <h2 className="text-[16px] font-medium text-[var(--creed-text-primary)]">
               Danger zone
             </h2>

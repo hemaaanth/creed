@@ -80,6 +80,7 @@ import {
   subscribeQualityRunner,
 } from "@/lib/ai/quality-runner";
 import { RichTextEditor } from "@/components/creed/rich-text-editor";
+import { CreedFindReplace } from "@/components/creed/find-replace";
 import {
   DiffBadge,
   InlineMetaProposal,
@@ -709,7 +710,8 @@ export function FileScreen() {
   );
   const [activityOpen, setActivityOpen] = useState(false);
 
-  // Global ⌘A / Ctrl+A → toggle the activity sidebar instead of select-all.
+  // Plain A toggles the activity sidebar (guarded like the shell's other
+  // single-key shortcuts: K panel, M theme, S sidebar).
   // We skip when the user is typing inside an input / textarea / contenteditable
   // so basic editing still works.
   useEffect(() => {
@@ -723,9 +725,8 @@ export function FileScreen() {
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== "a" && event.key !== "A") return;
-      const isModifier = event.metaKey || event.ctrlKey;
-      if (!isModifier) return;
-      if (event.shiftKey || event.altKey) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (event.isComposing || event.repeat || event.defaultPrevented) return;
       if (isEditable(event.target)) return;
       event.preventDefault();
       setActivityOpen((current) => !current);
@@ -1435,11 +1436,24 @@ export function FileScreen() {
     });
   }, []);
 
+  // Panel/shell can open the push review and the activity sidebar. The push
+  // opener goes through a ref because handleOpenPushReview is re-created every
+  // render; the ref keeps shellFileActions stable so the shell registration
+  // effect doesn't churn.
+  const openPushFromShellRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    openPushFromShellRef.current = () => {
+      void handleOpenPushReview();
+    };
+  });
+
   const shellFileActions = useMemo(
     () => ({
       onAddSection: () => openComposerAndReveal(),
       onSectionSelect: handleSectionSelect,
       onProposalSelect: handleProposalSelect,
+      onOpenPush: () => openPushFromShellRef.current(),
+      onSetActivityOpen: (open: boolean) => setActivityOpen(open),
     }),
     [handleSectionSelect, handleProposalSelect, openComposerAndReveal]
   );
@@ -1594,7 +1608,21 @@ export function FileScreen() {
         const intent = JSON.parse(rawIntent) as
           | { type: "section"; sectionId: string }
           | { type: "compose" }
-          | { type: "proposal"; proposalId: string };
+          | { type: "proposal"; proposalId: string }
+          | { type: "push" }
+          | { type: "activity"; open: boolean };
+
+        if (intent.type === "push") {
+          window.sessionStorage.removeItem(FILE_NAV_INTENT_KEY);
+          openPushFromShellRef.current();
+          return;
+        }
+
+        if (intent.type === "activity") {
+          window.sessionStorage.removeItem(FILE_NAV_INTENT_KEY);
+          setActivityOpen(intent.open);
+          return;
+        }
 
         if (intent.type === "compose") {
           const scrolled = scrollComposerIntoView("smooth");
@@ -2215,6 +2243,8 @@ export function FileScreen() {
         />
 
       </div>
+
+      <CreedFindReplace scrollRef={editorScrollRef} />
 
       <Dialog open={pushDialogOpen} onOpenChange={setPushDialogOpen}>
         <DialogContent className="rounded-[var(--radius-xl)] border-[var(--creed-border)] bg-[var(--creed-surface)]">

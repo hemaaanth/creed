@@ -1157,6 +1157,16 @@ export function sectionToMarkdown(section: CreedSection) {
   return cleaned ? `## ${section.name}\n\n${cleaned}\n` : `## ${section.name}\n`;
 }
 
+// Section body as markdown, without the leading "## Name" heading that
+// sectionToMarkdown prepends. Feeding markdown (not the stored HTML) to a model
+// keeps the prompt compact and stops it echoing HTML back into a text field.
+// Shared by the Panel's Ask/Search and Agent routes so both see the same body.
+export function sectionBodyMarkdown(section: CreedSection): string {
+  return sectionToMarkdown(section)
+    .replace(/^##\s.*(?:\n+|$)/, "")
+    .trim();
+}
+
 function stripTags(value: string) {
   return decodeEntities(value.replace(/<[^>]+>/g, ""));
 }

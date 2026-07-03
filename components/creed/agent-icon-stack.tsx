@@ -1,11 +1,16 @@
 "use client";
 
-import { IntegrationGlyph } from "@/components/creed/brand";
+import { CreedAgentGlyph, IntegrationGlyph } from "@/components/creed/brand";
 import { getAgentIconKind } from "@/lib/agent-icon";
 import type { AgentIconKind, McpClient } from "@/lib/creed-data";
 import { cn } from "@/lib/utils";
 
 export { getAgentIconKind };
+
+// The in-app agent's name. Rendered with the blue Creed brandmark instead of a
+// generic glyph so a Creed-authored proposal reads as "the app itself".
+const CREED_AGENT_NAME = "creed";
+const isCreedAgent = (name: string) => name.trim().toLowerCase() === CREED_AGENT_NAME;
 
 type AgentLike = string | Pick<McpClient, "name" | "icon"> | { agentName?: string; icon?: AgentIconKind };
 
@@ -77,16 +82,20 @@ export function AgentIconStack({
             itemClassName
           )}
         >
-          <IntegrationGlyph
-            kind={agent.icon}
-            framed={false}
-            className="h-full w-full"
-            assetClassName={variant === "stacked" ? "h-full w-full" : "h-full w-full scale-[0.98]"}
-            iconClassName={cn(
-              "h-full w-full",
-              agent.icon === "custom" && (variant === "stacked" ? "scale-[0.78]" : "scale-[0.82]")
-            )}
-          />
+          {isCreedAgent(agent.name) ? (
+            <CreedAgentGlyph className={variant === "stacked" ? "h-[64%] w-[64%]" : "h-full w-full scale-[0.82]"} />
+          ) : (
+            <IntegrationGlyph
+              kind={agent.icon}
+              framed={false}
+              className="h-full w-full"
+              assetClassName={variant === "stacked" ? "h-full w-full" : "h-full w-full scale-[0.98]"}
+              iconClassName={cn(
+                "h-full w-full",
+                agent.icon === "custom" && (variant === "stacked" ? "scale-[0.78]" : "scale-[0.82]")
+              )}
+            />
+          )}
         </span>
       ))}
       {overflowCount > 0 ? (

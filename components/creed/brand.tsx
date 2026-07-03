@@ -62,6 +62,31 @@ export function CreedMark({ className }: { className?: string }) {
   );
 }
 
+// The Creed brandmark rendered in brand blue, for the in-app "Creed" agent's
+// identity on proposal cards and activity rows. The logo SVG is used as a mask
+// over a solid accent fill, so the shape reads as exactly --creed-accent in
+// both themes (a plain <img> can't be recoloured to an exact hue).
+export function CreedAgentGlyph({ className }: { className?: string }) {
+  return (
+    <span
+      role="img"
+      aria-label="Creed"
+      className={cn("block shrink-0", className)}
+      style={{
+        backgroundColor: "var(--creed-accent)",
+        WebkitMaskImage: `url(${logo})`,
+        maskImage: `url(${logo})`,
+        WebkitMaskRepeat: "no-repeat",
+        maskRepeat: "no-repeat",
+        WebkitMaskPosition: "center",
+        maskPosition: "center",
+        WebkitMaskSize: "contain",
+        maskSize: "contain",
+      }}
+    />
+  );
+}
+
 // Type of every glyph the brand component knows how to render. Kept as
 // a literal union (rather than a runtime object whose keys are read at
 // type-time) so the value isn't constructed just to satisfy `keyof`.

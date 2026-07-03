@@ -62,17 +62,35 @@ export const AI_MODEL_QUALITY_META: Record<
 export const DEFAULT_AI_MODEL_ID = "openai/gpt-5.5";
 
 // Server-selected model per feature, hidden from the user (there is no in-app
-// model picker). Only Analysis is wired today; Tab and CMD-K read their env
-// vars once those features ship. Any unset var falls back to the internal
-// default. See project-context/roadmap.md.
+// model picker). Analysis and Panel are wired today; Tab reads its env var once
+// the feature ships. Any unset var falls back to the per-feature default. See
+// project-context/roadmap.md.
 const FEATURE_MODEL_ENV: Record<AiFeature, string> = {
   analysis: "ANALYSIS_MODEL",
   tab: "TAB_MODEL",
-  cmdk: "CMDK_MODEL",
+  panel: "PANEL_MODEL",
+};
+
+// Panel resolves a query into a handful of navigation actions - it lives or
+// dies on latency, so it defaults to a strong open-weights model that Groq and
+// Cerebras both serve (the panel route requests throughput-sorted routing, so
+// OpenRouter lands on that fast silicon). The flagship default stays for the
+// deeper features.
+const FEATURE_MODEL_DEFAULT: Record<AiFeature, string> = {
+  analysis: DEFAULT_AI_MODEL_ID,
+  tab: DEFAULT_AI_MODEL_ID,
+  panel: "openai/gpt-oss-120b",
 };
 
 export function getFeatureModelId(feature: AiFeature): string {
-  return process.env[FEATURE_MODEL_ENV[feature]]?.trim() || DEFAULT_AI_MODEL_ID;
+  return process.env[FEATURE_MODEL_ENV[feature]]?.trim() || FEATURE_MODEL_DEFAULT[feature];
+}
+
+// Panel's Agent mode bills under the "panel" feature but runs a different,
+// stronger model than Search/Ask: it writes real edits, so quality beats the
+// millisecond latency the navigator needs. Defaults to GLM 5.2.
+export function getAgentModelId(): string {
+  return process.env.CREED_AGENT_MODEL?.trim() || "z-ai/glm-5.2";
 }
 
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
@@ -172,6 +190,7 @@ const benchmarkRules: Array<{ pattern: RegExp; score: number; label: string }> =
   { pattern: /deepseek.*(r1|v3|chat-v3)/i, score: 86, label: "Reasoning benchmark proxy" },
   { pattern: /kimi.*k2|moonshot.*k2/i, score: 84, label: "Reasoning benchmark proxy" },
   { pattern: /qwen-?(?:3|max|coder.*plus|3-235|2\.5-72b)/i, score: 84, label: "Reasoning benchmark proxy" },
+  { pattern: /glm-?[5-9]/i, score: 86, label: "Reasoning benchmark proxy" },
   { pattern: /glm-?4\.[5-9]/i, score: 82, label: "Reasoning benchmark proxy" },
   { pattern: /llama-?(?:4|3\.[1-3].*70|3\.[1-3].*405)/i, score: 82, label: "Reasoning benchmark proxy" },
   { pattern: /mistral.*(large|medium-3)/i, score: 80, label: "Reasoning benchmark proxy" },

@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import Link from "next/link";
@@ -39,11 +40,19 @@ import { Separator } from "@/components/ui/separator";
 import { accentColorMap, type CreedSection } from "@/lib/creed-data";
 import { cn } from "@/lib/utils";
 import { CreedMark, CreedWordmark } from "@/components/creed/brand";
+import { CreedPanel, PANEL_OPEN_EVENT } from "@/components/creed/panel";
+import {
+  getAgentRunnerServerSnapshot,
+  getAgentRunnerSnapshot,
+  subscribeAgentRunner,
+} from "@/lib/panel/agent-runner";
+import { SearchIcon, type SearchIconHandle } from "@/components/ui/search";
 import { useCreed } from "@/components/creed/creed-provider";
 import { preloadSettingsData } from "@/components/creed/settings-preload";
 import { preloadMcpHealth } from "@/components/creed/mcp-health-preload";
 
 const FILE_NAV_INTENT_KEY = "creed:file-nav-intent";
+const SIDEBAR_COLLAPSED_KEY = "creed:sidebar-collapsed";
 
 type ShellProps = {
   children: ReactNode;
@@ -58,6 +67,8 @@ type ShellFileActions = {
   onAddSection?: () => void;
   onSectionSelect?: (sectionId: string) => void;
   onProposalSelect?: (proposalId: string) => void;
+  onOpenPush?: () => void;
+  onSetActivityOpen?: (open: boolean) => void;
 };
 
 type ShellActionsContextValue = {
@@ -76,9 +87,11 @@ const navItems = [
 function ShellNavLink({
   item,
   active,
+  collapsed,
 }: {
   item: (typeof navItems)[number];
   active: boolean;
+  collapsed: boolean;
 }) {
   const Icon = item.icon;
   const router = useRouter();
@@ -92,7 +105,11 @@ function ShellNavLink({
         // the two stacks read as one continuous list. On mobile each button is
         // a centred square (h-8 w-8) so the selected-state background reads as
         // a square, not a slight rectangle; lg restores the full-width row.
-        "flex h-8 w-8 mx-auto items-center justify-center rounded-[10px] text-[14px] font-medium text-[var(--creed-text-secondary)] transition-colors duration-150 hover:bg-[var(--creed-surface-raised)] hover:text-[var(--creed-text-primary)] lg:h-auto lg:w-auto lg:mx-0 lg:min-h-0 lg:justify-start lg:gap-3 lg:px-2 lg:py-2",
+        // When the sidebar is collapsed (S key) the lg styles are dropped so
+        // desktop renders the same icon rail as mobile.
+        "flex h-8 w-8 mx-auto items-center justify-center rounded-[10px] text-[14px] font-medium text-[var(--creed-text-secondary)] transition-colors duration-150 hover:bg-[var(--creed-surface-raised)] hover:text-[var(--creed-text-primary)]",
+        !collapsed &&
+          "lg:h-auto lg:w-auto lg:mx-0 lg:min-h-0 lg:justify-start lg:gap-3 lg:px-2 lg:py-2",
         active &&
           "bg-[var(--creed-surface-raised)] text-[var(--creed-text-primary)] hover:bg-[var(--creed-surface-raised)]"
       )}
@@ -109,7 +126,7 @@ function ShellNavLink({
         initialState={initialState}
         className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center leading-none"
       />
-      <span className="hidden lg:inline">{item.label}</span>
+      <span className={cn("hidden", !collapsed && "lg:inline")}>{item.label}</span>
     </Link>
   );
 }
@@ -127,6 +144,36 @@ export function CreedShell({
   const { signOut, state, exportMarkdown } = useCreed();
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const [billingOpen, setBillingOpen] = useState(false);
+  const searchIconRef = useRef<SearchIconHandle | null>(null);
+  const agentRun = useSyncExternalStore(subscribeAgentRunner, getAgentRunnerSnapshot, getAgentRunnerServerSnapshot);
+  const agentBusy = agentRun.status === "working" || agentRun.status === "applying";
+  // Desktop sidebar collapse (S key). Collapsed drops every lg: sidebar style
+  // so desktop renders the same 48px icon rail as mobile. Persisted so the
+  // choice survives reloads; read in an effect to keep SSR markup stable.
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    setCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1");
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.key !== "s" && event.key !== "S") || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      const target = event.target as HTMLElement | null;
+      if (!target || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable) return;
+      if (event.isComposing || event.repeat || event.defaultPrevented) return;
+      event.preventDefault();
+      setCollapsed((current) => {
+        const next = !current;
+        try {
+          window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+        } catch {}
+        return next;
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const fileActionsRef = useRef<ShellFileActions>({});
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const registerFileActions = useCallback((actions: ShellFileActions) => {
@@ -222,6 +269,8 @@ export function CreedShell({
       | { type: "section"; sectionId: string }
       | { type: "compose" }
       | { type: "proposal"; proposalId: string }
+      | { type: "push" }
+      | { type: "activity"; open: boolean }
   ) {
     if (typeof window === "undefined") {
       return;
@@ -250,38 +299,129 @@ export function CreedShell({
     router.push("/file");
   }
 
+  function handleProposalClick(proposalId: string) {
+    if (pathname === "/file" && fileActionsRef.current.onProposalSelect) {
+      fileActionsRef.current.onProposalSelect(proposalId);
+      return;
+    }
+
+    setFileIntent({ type: "proposal", proposalId });
+    router.push("/file");
+  }
+
+  function handleOpenPushClick() {
+    if (pathname === "/file" && fileActionsRef.current.onOpenPush) {
+      fileActionsRef.current.onOpenPush();
+      return;
+    }
+
+    setFileIntent({ type: "push" });
+    router.push("/file");
+  }
+
+  function handleActivityClick(open: boolean) {
+    if (pathname === "/file" && fileActionsRef.current.onSetActivityOpen) {
+      fileActionsRef.current.onSetActivityOpen(open);
+      return;
+    }
+
+    setFileIntent({ type: "activity", open });
+    router.push("/file");
+  }
+
   return (
     <ShellActionsContext.Provider value={shellActions}>
-      <div className="grid h-screen grid-cols-[48px_minmax(0,1fr)] overflow-hidden bg-[var(--creed-surface)] lg:grid-cols-[220px_minmax(0,1fr)]">
-        <aside className="h-screen overflow-hidden border-r border-[var(--creed-border)] bg-[var(--creed-surface)] px-1.5 py-3 lg:px-5 lg:py-5">
+      <div
+        className={cn(
+          "grid h-screen grid-cols-[48px_minmax(0,1fr)] overflow-hidden bg-[var(--creed-surface)] transition-[grid-template-columns] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          !collapsed && "lg:grid-cols-[220px_minmax(0,1fr)]"
+        )}
+      >
+        <aside
+          className={cn(
+            "h-screen overflow-hidden border-r border-[var(--creed-border)] bg-[var(--creed-surface)] px-1.5 py-3",
+            !collapsed && "lg:px-5 lg:py-5"
+          )}
+        >
           <div className="flex h-full flex-col">
             <Link
               href="/home"
               aria-label="Creed home"
-              className="mx-auto flex h-8 w-8 items-center justify-center rounded-[10px] transition-opacity duration-200 hover:opacity-60 lg:mx-0 lg:h-auto lg:w-auto lg:justify-start lg:px-2 lg:py-1.5"
+              className={cn(
+                "mx-auto flex h-8 w-8 items-center justify-center rounded-[10px] transition-opacity duration-200 hover:opacity-60",
+                !collapsed && "lg:mx-0 lg:h-auto lg:w-auto lg:justify-start lg:px-2 lg:py-1.5"
+              )}
             >
-              <span className="lg:hidden">
+              <span className={cn(!collapsed && "lg:hidden")}>
                 <CreedMark />
               </span>
-              <span className="hidden lg:block">
+              <span className={cn("hidden", !collapsed && "lg:block")}>
                 <CreedWordmark className="ml-0" />
               </span>
             </Link>
 
-            <nav className="mt-5 space-y-1 lg:mt-8">
+            <nav className={cn("mt-5 space-y-1", !collapsed && "lg:mt-8")}>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new Event(PANEL_OPEN_EVENT))}
+                onMouseEnter={() => searchIconRef.current?.startAnimation()}
+                onMouseLeave={() => searchIconRef.current?.stopAnimation()}
+                className={cn(
+                  "flex h-8 w-8 mx-auto items-center justify-center rounded-[10px] text-[14px] font-medium text-[var(--creed-text-secondary)] transition-colors duration-150 hover:bg-[var(--creed-surface-raised)] hover:text-[var(--creed-text-primary)]",
+                  !collapsed && "lg:h-auto lg:w-full lg:mx-0 lg:min-h-0 lg:justify-start lg:gap-3 lg:px-2 lg:py-2"
+                )}
+                aria-label="Search"
+              >
+                <span className="relative inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                  <SearchIcon
+                    ref={searchIconRef}
+                    size={14}
+                    className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center leading-none"
+                  />
+                  {/* Agent running in the background: a small pulsing dot on
+                      the icon. Hidden on the expanded row, where the trailing
+                      dot below takes over, so only one dot ever shows. */}
+                  {agentBusy ? (
+                    <span className={cn("absolute -right-1 -top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--creed-accent)]", !collapsed && "lg:hidden")} />
+                  ) : null}
+                </span>
+                <span className={cn("hidden min-w-0 flex-1 text-left", !collapsed && "lg:inline")}>Search</span>
+                {agentBusy ? (
+                  <span className={cn("hidden h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--creed-accent)]", !collapsed && "lg:inline-block")} aria-label="Creed is working" />
+                ) : (
+                  <kbd
+                    className={cn(
+                      "hidden h-5 w-5 items-center justify-center rounded border border-[var(--creed-border)] bg-[var(--creed-surface-raised)] text-[10px] font-medium text-[var(--creed-text-secondary)]",
+                      !collapsed && "lg:inline-flex"
+                    )}
+                  >
+                    K
+                  </kbd>
+                )}
+              </button>
               {navItems.map((item) => {
                 const active = pathname === item.href;
 
-                return <ShellNavLink key={item.href} item={item} active={active} />;
+                return <ShellNavLink key={item.href} item={item} active={active} collapsed={collapsed} />;
               })}
             </nav>
 
-            <Separator className="my-4 bg-[var(--creed-border)] lg:my-6" />
+            <Separator className={cn("my-4 bg-[var(--creed-border)]", !collapsed && "lg:my-6")} />
 
-            <div className="hidden text-[13px] font-medium text-[var(--creed-text-tertiary)] lg:block">
+            <div
+              className={cn(
+                "hidden text-[13px] font-medium text-[var(--creed-text-tertiary)]",
+                !collapsed && "lg:block"
+              )}
+            >
               Sections
             </div>
-            <div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto creed-scrollbar lg:mt-4 lg:pr-1">
+            <div
+              className={cn(
+                "mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto creed-scrollbar",
+                !collapsed && "lg:mt-4 lg:pr-1"
+              )}
+            >
               {sections.filter((section) => !section.archived).map((section) => {
                 const pendingCount = pendingProposalCountBySection.get(section.id) ?? 0;
                 const isActive = activeSectionId === section.id && pathname === "/file";
@@ -289,7 +429,10 @@ export function CreedShell({
                 const content = (
                   <>
                     <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-[3px] lg:h-1.5 lg:w-1.5 lg:rounded-[2px]"
+                      className={cn(
+                        "h-2.5 w-2.5 shrink-0 rounded-[3px]",
+                        !collapsed && "lg:h-1.5 lg:w-1.5 lg:rounded-[2px]"
+                      )}
                       style={{
                         // Pending-delete dot turns red so the row reads as
                         // a coherent "this is being removed" signal rather
@@ -301,7 +444,8 @@ export function CreedShell({
                     />
                     <span
                       className={cn(
-                        "hidden truncate lg:inline",
+                        "hidden truncate",
+                        !collapsed && "lg:inline",
                         pendingDelete && "line-through"
                       )}
                     >
@@ -309,7 +453,10 @@ export function CreedShell({
                     </span>
                     {pendingCount > 0 ? (
                       <span
-                        className="ml-auto hidden h-[18px] min-w-[18px] items-center justify-center rounded-[5px] bg-[#2563EB] px-1.5 text-[10px] font-medium leading-none text-white tabular-nums lg:inline-flex"
+                        className={cn(
+                          "ml-auto hidden h-[18px] min-w-[18px] items-center justify-center rounded-[5px] bg-[#2563EB] px-1.5 text-[10px] font-medium leading-none text-white tabular-nums",
+                          !collapsed && "lg:inline-flex"
+                        )}
                         aria-label={`${pendingCount} pending proposal${pendingCount === 1 ? "" : "s"}`}
                       >
                         {pendingCount}
@@ -324,7 +471,9 @@ export function CreedShell({
                     type="button"
                     onClick={() => handleSectionClick(section.id)}
                     className={cn(
-                      "flex h-8 w-8 mx-auto items-center justify-center rounded-[10px] text-left text-[14px] font-medium text-[var(--creed-text-secondary)] transition-colors duration-150 hover:bg-[var(--creed-surface-raised)] hover:text-[var(--creed-text-primary)] lg:h-auto lg:w-full lg:mx-0 lg:min-h-0 lg:justify-start lg:gap-3 lg:px-2 lg:py-2",
+                      "flex h-8 w-8 mx-auto items-center justify-center rounded-[10px] text-left text-[14px] font-medium text-[var(--creed-text-secondary)] transition-colors duration-150 hover:bg-[var(--creed-surface-raised)] hover:text-[var(--creed-text-primary)]",
+                      !collapsed &&
+                        "lg:h-auto lg:w-full lg:mx-0 lg:min-h-0 lg:justify-start lg:gap-3 lg:px-2 lg:py-2",
                       isActive &&
                         "bg-[var(--creed-surface-raised)] text-[var(--creed-text-primary)] hover:bg-[var(--creed-surface-raised)]",
                       // Pending delete: subtle red wash and red text so the
@@ -356,16 +505,11 @@ export function CreedShell({
                 <button
                   key={row.id}
                   type="button"
-                  onClick={() => {
-                    if (pathname === "/file" && fileActionsRef.current.onProposalSelect) {
-                      fileActionsRef.current.onProposalSelect(row.id);
-                      return;
-                    }
-                    setFileIntent({ type: "proposal", proposalId: row.id });
-                    router.push("/file");
-                  }}
+                  onClick={() => handleProposalClick(row.id)}
                   className={cn(
-                    "flex h-8 w-8 mx-auto items-center justify-center rounded-[10px] bg-[#ECFDF5] text-left text-[14px] font-medium text-[#047857] transition-colors duration-150 hover:bg-[#D1FAE5] hover:text-[#065F46] dark:bg-[#052e1a]/40 dark:text-[#4ade80] dark:hover:bg-[#052e1a]/60 dark:hover:text-[#4ade80] lg:h-auto lg:w-full lg:mx-0 lg:min-h-0 lg:justify-start lg:gap-3 lg:px-2 lg:py-2",
+                    "flex h-8 w-8 mx-auto items-center justify-center rounded-[10px] bg-[#ECFDF5] text-left text-[14px] font-medium text-[#047857] transition-colors duration-150 hover:bg-[#D1FAE5] hover:text-[#065F46] dark:bg-[#052e1a]/40 dark:text-[#4ade80] dark:hover:bg-[#052e1a]/60 dark:hover:text-[#4ade80]",
+                    !collapsed &&
+                      "lg:h-auto lg:w-full lg:mx-0 lg:min-h-0 lg:justify-start lg:gap-3 lg:px-2 lg:py-2",
                     // Same active-equals-hover rule as the pending-delete
                     // rows above: once the user has scrolled into the
                     // proposal preview, lock the row into its hover tone.
@@ -374,10 +518,13 @@ export function CreedShell({
                   aria-label={`Proposed: ${row.name}`}
                 >
                   <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-[3px] lg:h-1.5 lg:w-1.5 lg:rounded-[2px]"
+                    className={cn(
+                      "h-2.5 w-2.5 shrink-0 rounded-[3px]",
+                      !collapsed && "lg:h-1.5 lg:w-1.5 lg:rounded-[2px]"
+                    )}
                     style={{ backgroundColor: "#10B981" }}
                   />
-                  <span className="hidden truncate lg:inline">{row.name}</span>
+                  <span className={cn("hidden truncate", !collapsed && "lg:inline")}>{row.name}</span>
                 </button>
                 );
               })}
@@ -385,23 +532,34 @@ export function CreedShell({
               <button
                 type="button"
                 onClick={handleAddSectionClick}
-                className="flex h-8 w-8 mx-auto items-center justify-center rounded-[10px] text-left text-[14px] text-[var(--creed-text-tertiary)] transition-colors duration-150 hover:bg-[var(--creed-surface-raised)] hover:text-[var(--creed-text-primary)] lg:h-auto lg:w-full lg:mx-0 lg:min-h-0 lg:justify-start lg:gap-2 lg:px-2 lg:py-2"
+                className={cn(
+                  "flex h-8 w-8 mx-auto items-center justify-center rounded-[10px] text-left text-[14px] text-[var(--creed-text-tertiary)] transition-colors duration-150 hover:bg-[var(--creed-surface-raised)] hover:text-[var(--creed-text-primary)]",
+                  !collapsed && "lg:h-auto lg:w-full lg:mx-0 lg:min-h-0 lg:justify-start lg:gap-2 lg:px-2 lg:py-2"
+                )}
                 aria-label="Add section"
               >
                 <Plus className="h-3.5 w-3.5" strokeWidth={1.8} />
-                <span className="hidden lg:inline"> Add section</span>
+                <span className={cn("hidden", !collapsed && "lg:inline")}> Add section</span>
               </button>
             </div>
 
             <div className="mt-auto">
-              <Separator className="my-4 bg-[var(--creed-border)] lg:my-6" />
+              <Separator className={cn("my-4 bg-[var(--creed-border)]", !collapsed && "lg:my-6")} />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
-                    className="h-auto w-full min-w-0 justify-center rounded-[10px] border-0 bg-transparent px-1 py-1 transition-colors hover:bg-[var(--creed-surface-raised)] aria-expanded:bg-[var(--creed-surface-raised)] dark:hover:bg-[var(--creed-surface-raised)] lg:justify-between lg:bg-transparent lg:pl-[7px] lg:pr-2.5 lg:py-1.5"
+                    className={cn(
+                      "h-auto w-full min-w-0 justify-center rounded-[10px] border-0 bg-transparent px-1 py-1 transition-colors hover:bg-[var(--creed-surface-raised)] aria-expanded:bg-[var(--creed-surface-raised)] dark:hover:bg-[var(--creed-surface-raised)]",
+                      !collapsed && "lg:justify-between lg:bg-transparent lg:pl-[7px] lg:pr-2.5 lg:py-1.5"
+                    )}
                   >
-                    <span className="flex min-w-0 w-full items-center justify-center gap-2.5 lg:justify-start">
+                    <span
+                      className={cn(
+                        "flex min-w-0 w-full items-center justify-center gap-2.5",
+                        !collapsed && "lg:justify-start"
+                      )}
+                    >
                       <Avatar className="h-6 w-6 overflow-hidden rounded-[8px] border border-[var(--creed-border)] bg-[var(--creed-surface-raised)] after:rounded-[8px]">
                         {showAvatarImage && avatarUrl ? (
                           <Image
@@ -420,7 +578,12 @@ export function CreedShell({
                           </AvatarFallback>
                         )}
                       </Avatar>
-                      <span className="hidden min-w-0 flex-1 truncate text-left text-sm font-medium text-[var(--creed-text-primary)] lg:inline">
+                      <span
+                        className={cn(
+                          "hidden min-w-0 flex-1 truncate text-left text-sm font-medium text-[var(--creed-text-primary)]",
+                          !collapsed && "lg:inline"
+                        )}
+                      >
                         {userName}
                       </span>
                     </span>
@@ -428,7 +591,12 @@ export function CreedShell({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                   align="start"
-                  className="w-(--radix-dropdown-menu-trigger-width) border-[var(--creed-border)] bg-[var(--creed-surface)]"
+                  className={cn(
+                    "border-[var(--creed-border)] bg-[var(--creed-surface)]",
+                    // Collapsed rail: the trigger is a 40px square, so the
+                    // trigger-width menu would be unusably narrow.
+                    collapsed ? "w-48" : "w-(--radix-dropdown-menu-trigger-width)"
+                  )}
                 >
                   <AnimatedMenuIconItem
                     icon={LinkIcon}
@@ -480,6 +648,14 @@ export function CreedShell({
       </div>
 
       <BillingDialog open={billingOpen} onOpenChange={setBillingOpen} />
+      <CreedPanel
+        onFileSection={handleSectionClick}
+        onFileProposal={handleProposalClick}
+        onAddSection={handleAddSectionClick}
+        onOpenBilling={() => setBillingOpen(true)}
+        onOpenPush={handleOpenPushClick}
+        onSetActivity={handleActivityClick}
+      />
     </ShellActionsContext.Provider>
   );
 }
