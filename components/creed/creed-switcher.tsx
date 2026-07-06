@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
@@ -23,11 +23,28 @@ export function CreedSwitcher() {
   const { state, switchCreed } = useCreed();
   const router = useRouter();
   const [switching, setSwitching] = useState(false);
+  const [optimisticId, setOptimisticId] = useState<string | null>(null);
 
   const creeds = state.creeds ?? [];
   const activeId = state.creedId ?? creeds.find((c) => c.type === "personal")?.id ?? creeds[0]?.id ?? null;
-  const displayName =
-    state.creedType === "company" ? state.company?.creedName ?? "Company" : state.user.name;
+  const shownActiveId = optimisticId ?? activeId;
+  const optimisticCreed = useMemo(
+    () => creeds.find((creed) => creed.id === shownActiveId) ?? null,
+    [creeds, shownActiveId],
+  );
+  const displayName = optimisticCreed
+    ? optimisticCreed.type === "personal"
+      ? state.user.name
+      : optimisticCreed.name
+    : state.creedType === "company"
+      ? state.company?.creedName ?? "Company"
+      : state.user.name;
+
+  useEffect(() => {
+    if (optimisticId && activeId === optimisticId) {
+      setOptimisticId(null);
+    }
+  }, [activeId, optimisticId]);
 
   // One Creed (or none loaded): plain title, no dropdown.
   if (creeds.length <= 1) {
@@ -37,6 +54,7 @@ export function CreedSwitcher() {
   async function switchTo(creed: { id: string; needsSetup?: boolean }) {
     if (creed.id === activeId && !creed.needsSetup) return;
     setSwitching(true);
+    setOptimisticId(creed.id);
     try {
       // A company that hasn't finished setup routes into the onboarding flow
       // (which owns the gate/redirect). Set the active cookie first so onboarding
@@ -50,6 +68,7 @@ export function CreedSwitcher() {
         if (!response.ok) {
           const data = (await response.json().catch(() => ({}))) as { error?: string };
           toast.error(data.error ?? "Could not switch Creed.");
+          setOptimisticId(null);
           setSwitching(false);
           return;
         }
@@ -62,10 +81,12 @@ export function CreedSwitcher() {
       const result = await switchCreed(creed.id);
       if (!result.ok) {
         toast.error(result.error ?? "Could not switch Creed.");
+        setOptimisticId(null);
       }
       setSwitching(false);
     } catch {
       toast.error("Could not switch Creed.");
+      setOptimisticId(null);
       setSwitching(false);
     }
   }
@@ -80,7 +101,7 @@ export function CreedSwitcher() {
           // No card: aligned like the plain title, greyed on hover the same way
           // the brand mark dims (opacity), and the arrow points down by default,
           // flipping up while the menu is open.
-          className="group/switcher inline-flex items-center gap-2 text-left transition-opacity duration-200 hover:opacity-60"
+          className="group/switcher inline-flex items-center gap-2 text-left transition-opacity duration-[160ms] hover:opacity-60 disabled:opacity-70"
         >
           <span className={TITLE_CLASS}>{displayName} / Creed</span>
           <ChevronDown
@@ -92,7 +113,7 @@ export function CreedSwitcher() {
       <DropdownMenuContent align="start" className="min-w-[264px] border-[var(--creed-border)] bg-[var(--creed-surface)] p-1.5">
         {creeds.map((creed) => {
           const label = creed.type === "personal" ? state.user.name : creed.name;
-          const isActive = creed.id === activeId;
+          const isActive = creed.id === shownActiveId;
           return (
             <DropdownMenuItem
               key={creed.id}
