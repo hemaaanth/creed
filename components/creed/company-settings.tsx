@@ -241,6 +241,7 @@ export function CompanySettings() {
   const {
     state,
     refreshState,
+    restoreSection,
     setProfileAvatar,
     exportMarkdown,
     exportActivityJson,
@@ -747,19 +748,6 @@ export function CompanySettings() {
       repoName: rest.join("/"),
       branch: "",
     });
-  }
-
-  async function setSectionArchived(
-    sectionId: string,
-    archived: boolean,
-    name: string,
-  ) {
-    if (
-      await post(`/api/app/sections/${sectionId}`, { creedId, archived }, "PUT")
-    ) {
-      toast.success(archived ? `Archived "${name}".` : `Restored "${name}".`);
-      await refreshState();
-    }
   }
 
   async function deleteArchivedSection(sectionId: string) {
@@ -1803,13 +1791,10 @@ export function CompanySettings() {
                       <Button
                         variant="outline"
                         className="rounded-md border-[var(--creed-border)]"
-                        onClick={() =>
-                          void setSectionArchived(
-                            section.id,
-                            false,
-                            section.name,
-                          )
-                        }
+                        onClick={() => {
+                          restoreSection(section.id);
+                          toast.success(`Restored "${section.name}".`);
+                        }}
                       >
                         Restore
                       </Button>
