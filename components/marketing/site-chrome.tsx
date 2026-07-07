@@ -237,8 +237,8 @@ export function MarketingHeader({
             {/* Subtle backdrop blur localized to the menu area. Sits
                 OUTSIDE the motion.div below because motion's filter
                 animation creates a stacking context that nukes
-                backdrop-filter on descendants. A radial-mask fades the
-                blur to zero at the edges so there's no visible card
+                backdrop-filter on descendants. A large, soft radial mask fades
+                the blur to zero at the edges so there's no visible card
                 outline - the blur just melts into the surrounding hero. */}
             <motion.div
               aria-hidden="true"
@@ -246,13 +246,13 @@ export function MarketingHeader({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-              className="pointer-events-none absolute right-0 top-[3.65rem] h-[19rem] w-[12rem] backdrop-blur-[6px]"
+              className="pointer-events-none absolute -right-6 top-[3.1rem] h-[21rem] w-[15rem] bg-black/[0.035] backdrop-blur-[12px]"
               style={{
-                WebkitBackdropFilter: "blur(6px)",
+                WebkitBackdropFilter: "blur(12px)",
                 WebkitMaskImage:
-                  "radial-gradient(ellipse 70% 70% at 70% 50%, black 35%, transparent 80%)",
+                  "radial-gradient(ellipse 76% 78% at 72% 46%, black 30%, rgba(0,0,0,0.72) 54%, transparent 100%)",
                 maskImage:
-                  "radial-gradient(ellipse 70% 70% at 70% 50%, black 35%, transparent 80%)",
+                  "radial-gradient(ellipse 76% 78% at 72% 46%, black 30%, rgba(0,0,0,0.72) 54%, transparent 100%)",
               }}
             />
 
@@ -514,23 +514,23 @@ function HeaderDropdown({
               exit={{ opacity: 0 }}
               transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
               className={cn(
-                "pointer-events-none absolute top-[1.6rem] w-[11rem] backdrop-blur-[7px]",
-                alignRight ? "-right-4" : "-left-4",
+                "pointer-events-none absolute top-[1.15rem] w-[13rem] bg-black/[0.03] backdrop-blur-[12px]",
+                alignRight ? "-right-8" : "-left-8",
               )}
               style={{
                 // Centred on the menu's bounding box (top-[2.6rem], w-[9rem], the
-                // h-9 rows with gap-2) with ~1rem of feather padding all round, so
+                // h-9 rows with gap-2) with generous feather padding all round, so
                 // the soft mask edges fade out beyond the items, not across them.
-                height: `${items.length * 2.75 + 1.5}rem`,
-                WebkitBackdropFilter: "blur(7px)",
+                height: `${items.length * 2.75 + 2.5}rem`,
+                WebkitBackdropFilter: "blur(12px)",
                 // Feathered rectangle (solid centre, soft edges on every side) with
                 // a wide, gradual fade so the blur melts into the hero instead of
                 // ending on a hard edge. Wider feather than the mobile menu since
                 // this is a tall vertical stack.
                 WebkitMaskImage:
-                  "linear-gradient(to right, transparent 0%, #000 15%, #000 85%, transparent 100%), linear-gradient(to bottom, transparent 0%, #000 18%, #000 82%, transparent 100%)",
+                  "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.55) 13%, #000 28%, #000 72%, rgba(0,0,0,0.55) 87%, transparent 100%), linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.55) 14%, #000 28%, #000 72%, rgba(0,0,0,0.55) 86%, transparent 100%)",
                 maskImage:
-                  "linear-gradient(to right, transparent 0%, #000 15%, #000 85%, transparent 100%), linear-gradient(to bottom, transparent 0%, #000 18%, #000 82%, transparent 100%)",
+                  "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.55) 13%, #000 28%, #000 72%, rgba(0,0,0,0.55) 87%, transparent 100%), linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.55) 14%, #000 28%, #000 72%, rgba(0,0,0,0.55) 86%, transparent 100%)",
                 maskComposite: "intersect",
                 WebkitMaskComposite: "source-in",
               }}
@@ -701,20 +701,20 @@ function MobileNavRow({
           <motion.div
             key="items"
             initial={{ opacity: 0, width: 0 }}
-            animate={{ opacity: 1, width: "auto" }}
+            animate={{ opacity: 1, width: "min(68vw, 24rem)" }}
             exit={{ opacity: 0, width: 0 }}
             transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            className="flex items-center gap-1 overflow-hidden px-5 py-2.5 backdrop-blur-[7px]"
+            className="flex items-center gap-1 overflow-x-auto overflow-y-hidden overscroll-x-contain bg-black/[0.04] px-7 py-3 backdrop-blur-[12px] [scrollbar-width:none] [touch-action:pan-x] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
             style={{
-              WebkitBackdropFilter: "blur(7px)",
+              WebkitBackdropFilter: "blur(12px)",
               // A flat, evenly-feathered panel rather than a radial "wheel":
               // two linear fades intersected give a solid centre with a soft
               // edge on every side, and the generous padding makes the blurred
               // area extend well beyond the text.
               maskImage:
-                "linear-gradient(to right, transparent 0%, #000 13%, #000 87%, transparent 100%), linear-gradient(to bottom, transparent 0%, #000 22%, #000 78%, transparent 100%)",
+                "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.55) 10%, #000 24%, #000 76%, rgba(0,0,0,0.55) 90%, transparent 100%), linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.55) 14%, #000 30%, #000 70%, rgba(0,0,0,0.55) 86%, transparent 100%)",
               WebkitMaskImage:
-                "linear-gradient(to right, transparent 0%, #000 13%, #000 87%, transparent 100%), linear-gradient(to bottom, transparent 0%, #000 22%, #000 78%, transparent 100%)",
+                "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.55) 10%, #000 24%, #000 76%, rgba(0,0,0,0.55) 90%, transparent 100%), linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.55) 14%, #000 30%, #000 70%, rgba(0,0,0,0.55) 86%, transparent 100%)",
               maskComposite: "intersect",
               WebkitMaskComposite: "source-in",
             }}
@@ -722,6 +722,7 @@ function MobileNavRow({
             {items.map((item, index) => (
               <motion.span
                 key={item.label}
+                className="shrink-0"
                 initial={{ opacity: 0, x: 8 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 8 }}
