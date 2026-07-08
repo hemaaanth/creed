@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import type { StaticImageData } from "next/image";
 import Link from "next/link";
@@ -146,6 +146,7 @@ const brandLogoMap: Record<
 export function BelowHeroSections({ configured }: { configured: boolean }) {
   return (
     <main className="bg-[var(--creed-background)] pb-12">
+      <WhyUseItSection />
       <HowCreedWorksSection />
       <GovernedCollaborationSection />
       <HowItWorksSection />
@@ -155,6 +156,146 @@ export function BelowHeroSections({ configured }: { configured: boolean }) {
       <ClosingCtaSection configured={configured} />
       <MarketingFooter />
     </main>
+  );
+}
+
+const WHY_USE_IT_STATS = [
+  {
+    value: 1_200_000_000,
+    suffix: "B+",
+    cadence: "/m",
+    divisor: 1_000_000_000,
+    decimals: 1,
+    label: "people use standalone AI tools",
+    body: "Each tool starts cold unless your context travels with you.",
+    accent: "#2563EB",
+  },
+  {
+    value: 420_000_000,
+    suffix: "M",
+    cadence: "/m",
+    divisor: 1_000_000,
+    decimals: 0,
+    label: "estimated multi-tool AI users",
+    body: "A simple 35 percent estimate across monthly AI users.",
+    accent: "#22C55E",
+  },
+  {
+    value: 2_100_000_000_000,
+    suffix: "T",
+    cadence: "/m",
+    divisor: 1_000_000_000_000,
+    decimals: 1,
+    label: "context tokens left behind",
+    body: "Multi-tool users leaving 5,000 useful context tokens behind.",
+    accent: "#EC4899",
+  },
+] as const;
+
+function useCountUp(target: number, durationMs = 1400) {
+  const [value, setValue] = useState(0);
+  const valueRef = useRef(0);
+
+  useEffect(() => {
+    let frameId = 0;
+    const from = valueRef.current;
+    const distance = target - from;
+    const start = performance.now();
+
+    function tick(now: number) {
+      const progress = Math.min((now - start) / durationMs, 1);
+      const eased = 1 - Math.pow(1 - progress, 4);
+      const nextValue = Math.round(from + distance * eased);
+      valueRef.current = nextValue;
+      setValue(nextValue);
+
+      if (progress < 1) {
+        frameId = requestAnimationFrame(tick);
+      }
+    }
+
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
+  }, [durationMs, target]);
+
+  return value;
+}
+
+function AnimatedStatNumber({
+  value,
+  divisor,
+  decimals,
+  suffix,
+  cadence,
+}: {
+  value: number;
+  divisor: number;
+  decimals: number;
+  suffix: string;
+  cadence: string;
+}) {
+  const current = useCountUp(value);
+  const display = (current / divisor).toFixed(decimals);
+  const [whole, fraction] = display.split(".");
+
+  return (
+    <span className="inline-flex items-end tabular-nums">
+      <span>
+        {whole}
+        {fraction ? (
+          <>
+            <span className="mx-[0.04em] inline-block translate-x-[3px] translate-y-[-0.012em] tracking-normal">
+              .
+            </span>
+            {fraction}
+          </>
+        ) : null}
+        {suffix}
+      </span>
+      <span className="mb-[0.2em] ml-[0.08em] text-[0.34em] font-medium leading-none tracking-[-0.02em] text-white">
+        {cadence}
+      </span>
+    </span>
+  );
+}
+
+function WhyUseItSection() {
+  return (
+    <section className="px-6 py-24 md:px-10 md:py-30 lg:px-12">
+      <SectionHeading
+        headline="Why Use It?"
+        subline="AI adoption is exploding. Context is still trapped in the last tool you used."
+        className="max-w-[64rem]"
+      />
+
+      <div className="mx-auto mt-14 grid max-w-6xl items-stretch gap-5 lg:grid-cols-3">
+        {WHY_USE_IT_STATS.map((stat) => (
+          <article
+            key={stat.label}
+            className="flex h-full min-h-[250px] flex-col rounded-2xl bg-[#111827] p-6 text-white dark:bg-[var(--creed-surface)] md:p-7"
+          >
+            <div
+              className="text-[4rem] font-semibold leading-[0.9] tracking-[-0.045em] md:text-[5.25rem]"
+              style={{ color: stat.accent }}
+            >
+              <AnimatedStatNumber
+                value={stat.value}
+                divisor={stat.divisor}
+                decimals={stat.decimals}
+                suffix={stat.suffix}
+                cadence={stat.cadence}
+              />
+            </div>
+            <div className="mt-5">
+              <h3 className="text-[1.35rem] font-medium leading-tight tracking-[-0.025em] text-white">
+                {stat.label}
+              </h3>
+              <p className="t-body mt-3 text-white/65">{stat.body}</p>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -223,7 +364,7 @@ function HowCreedWorksSection() {
   return (
     <section className="px-6 py-24 md:px-10 md:py-30 lg:px-12">
       <SectionHeading
-        headline="How Creed works"
+        headline="How It Works"
         subline="The profile your agents read, update, and keep sharp."
         className="max-w-[60rem]"
       />
