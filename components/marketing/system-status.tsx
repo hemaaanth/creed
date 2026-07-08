@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export type SystemStatus =
@@ -16,13 +17,35 @@ type StatusVariant = {
   text: string;
 };
 
-// Pinned to "operational" until we wire this to a real status backend. The
-// component already supports every state - pass `status` to override later.
+type LiveStatusColor = "green" | "yellow" | "red";
+
+type LiveStatusResponse = {
+  label?: unknown;
+  color?: unknown;
+};
+
 const DEFAULT_STATUS: SystemStatus = "operational";
+const DEFAULT_LABEL = "Fully operational";
+const STATUS_ENDPOINT = "/api/status";
+
+const STATUS_COLOR_CLASSES: Record<LiveStatusColor, Pick<StatusVariant, "dot" | "pulse">> = {
+  green: {
+    dot: "bg-[#22C55E]",
+    pulse: "bg-[#22C55E]/60",
+  },
+  yellow: {
+    dot: "bg-[#F59E0B]",
+    pulse: "bg-[#F59E0B]/60",
+  },
+  red: {
+    dot: "bg-[#DC2626]",
+    pulse: "bg-[#DC2626]/60",
+  },
+};
 
 const STATUS_VARIANTS: Record<SystemStatus, StatusVariant> = {
   operational: {
-    label: "All systems operational",
+    label: DEFAULT_LABEL,
     dot: "bg-[#22C55E]",
     pulse: "bg-[#22C55E]/60",
     text: "text-[var(--creed-text-secondary)]",
@@ -53,6 +76,10 @@ const STATUS_VARIANTS: Record<SystemStatus, StatusVariant> = {
   },
 };
 
+function isLiveStatusColor(value: unknown): value is LiveStatusColor {
+  return value === "green" || value === "yellow" || value === "red";
+}
+
 export function SystemStatusPill({
   status = DEFAULT_STATUS,
   href,
@@ -62,9 +89,50 @@ export function SystemStatusPill({
   href?: string;
   className?: string;
 }) {
-  const variant = STATUS_VARIANTS[status];
+  const initialVariant = STATUS_VARIANTS[status];
+  const [liveStatus, setLiveStatus] = useState<{
+    label: string;
+    color: LiveStatusColor;
+  }>({
+    label: initialVariant.label,
+    color: status === "outage" ? "red" : status === "operational" ? "green" : "yellow",
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadStatus() {
+      try {
+        const response = await fetch(STATUS_ENDPOINT, { cache: "no-store" });
+        if (!response.ok) return;
+
+        const data = (await response.json()) as LiveStatusResponse;
+        const label = typeof data.label === "string" ? data.label.trim() : "";
+        const color = isLiveStatusColor(data.color) ? data.color : null;
+
+        if (!cancelled && label && color) {
+          setLiveStatus({ label, color });
+        }
+      } catch {
+        // Keep the server-rendered fallback if the status endpoint is unreachable.
+      }
+    }
+
+    void loadStatus();
+    const intervalId = window.setInterval(loadStatus, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  const variant = {
+    ...initialVariant,
+    label: liveStatus.label,
+    ...STATUS_COLOR_CLASSES[liveStatus.color],
+  };
   const Tag = href ? "a" : "div";
-  const animatePulse = status !== "unknown";
 
   return (
     <Tag
@@ -76,14 +144,12 @@ export function SystemStatusPill({
       )}
     >
       <span className="relative flex h-2 w-2">
-        {animatePulse ? (
-          <span
-            className={cn(
-              "absolute inline-flex h-full w-full animate-ping rounded-full opacity-75",
-              variant.pulse
-            )}
-          />
-        ) : null}
+        <span
+          className={cn(
+            "absolute inline-flex h-full w-full animate-ping rounded-full opacity-75",
+            variant.pulse
+          )}
+        />
         <span className={cn("relative inline-flex h-2 w-2 rounded-full", variant.dot)} />
       </span>
       <span className="leading-none">{variant.label}</span>

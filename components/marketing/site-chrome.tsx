@@ -791,7 +791,7 @@ export function MarketingFooter() {
       </div>
 
       <div className="mx-auto mt-12 max-w-7xl">
-        <SystemStatusPill />
+        <SystemStatusPill href="https://status.creed.md" />
       </div>
 
       <div className="mx-auto mt-6 flex max-w-7xl flex-col gap-4 border-t border-[var(--creed-border)] py-6 md:flex-row md:items-center md:justify-between">
