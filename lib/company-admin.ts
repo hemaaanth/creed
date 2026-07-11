@@ -8,6 +8,7 @@ import type { AgentPermission } from "@/lib/creed-data";
 import { recordAuditEvent } from "@/lib/audit-log";
 import { getCompanyBilling } from "@/lib/company-billing";
 import { deriveCompanyAccessState } from "@/lib/creed-permissions";
+import { getDisplayName } from "@/lib/user-name";
 
 // Owner/admin management operations for a company Creed: roles, member removal,
 // per-section permissions, rename, ownership transfer, delete, and BYOK. All run
@@ -38,13 +39,7 @@ async function frozenResult(creedId: string): Promise<AdminResult | null> {
 }
 
 function actorName(user: User): string {
-  const meta = user.user_metadata ?? {};
-  return (
-    (typeof meta.full_name === "string" && meta.full_name.trim()) ||
-    (typeof meta.name === "string" && meta.name.trim()) ||
-    (user.email ? user.email.split("@")[0] : "") ||
-    "Someone"
-  );
+  return getDisplayName(user, "Someone");
 }
 
 async function activity(

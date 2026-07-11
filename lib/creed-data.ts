@@ -711,12 +711,22 @@ export type ConnectionItem = {
   description: string;
   // Short instruction for connecting this client over OAuth.
   connectHint: string;
-  // Optional copyable one-liner (e.g. `claude mcp add ...`).
-  command?: string;
-  // Optional one-click install deep link (e.g. Cursor).
-  deepLink?: string;
+  // Strongest agent-specific action for the card's primary button. When
+  // absent the card falls back to a plain "Copy URL" button.
+  primaryAction?: ConnectionAction;
+  // Optional second button (e.g. Copy JSON next to Cursor's install link).
+  secondaryAction?: ConnectionAction;
   lastUsed?: string;
 };
+
+// A connect-card button. "install" navigates in place (OS/web install links
+// that hand off to the agent) and flashes "Added"; "open" opens a settings
+// page in a new tab; "copy" writes `value` to the clipboard and flashes
+// "Copied".
+export type ConnectionAction =
+  | { kind: "install"; label: string; href: string }
+  | { kind: "open"; label: string; href: string }
+  | { kind: "copy"; label: string; value: string };
 
 export type AgentIconKind =
   | "claude"

@@ -7,6 +7,7 @@ import { sendEmail } from "@/lib/email";
 import { companyInviteSubject, renderCompanyInviteEmail } from "@/lib/email-templates/company-invite";
 import { getSiteUrl } from "@/lib/supabase/env";
 import { recordAuditEvent } from "@/lib/audit-log";
+import { getDisplayName } from "@/lib/user-name";
 
 // POST /api/app/company/invites { creedId, email, role } - owner/admin.
 // Creates a pending invite (seat + freeze checked in the lib) and emails the
@@ -43,10 +44,7 @@ export async function POST(request: Request) {
     .select("name")
     .eq("id", creedId)
     .maybeSingle()) as { data: { name: string } | null };
-  const inviterName =
-    (typeof auth.user.user_metadata?.full_name === "string" && auth.user.user_metadata.full_name) ||
-    (typeof auth.user.user_metadata?.name === "string" && auth.user.user_metadata.name) ||
-    (auth.user.email ? auth.user.email.split("@")[0] : "A teammate");
+  const inviterName = getDisplayName(auth.user, "A teammate");
   const siteUrl = getSiteUrl();
   const companyName = creed?.name ?? "the company";
   const sent = await sendEmail({

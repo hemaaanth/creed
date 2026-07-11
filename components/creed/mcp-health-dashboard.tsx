@@ -177,33 +177,59 @@ export function McpHealthDashboard() {
     function onFocusAgent(event: Event) {
       const detail = (event as CustomEvent<{ clientId?: string }>).detail;
       setAgentFilter(detail?.clientId ?? "all");
-      // The dashboard is the last block in the page's scroll container, and the
-      // filter change resizes charts after any fixed frame delay - so instead of
-      // scrollIntoView (whose target goes stale), scroll the container to its
-      // bottom, re-issuing for a few frames until the layout stops growing.
-      const container = rootRef.current?.closest(
+      // Align the dashboard's TOP with the container's top, not the container
+      // bottom: the charts below load data and resize well after any fixed
+      // frame budget, so a scroll-to-bottom target keeps going stale and lands
+      // short. The section's top only depends on the (static) content above
+      // it, so pinning it is immune to below-the-fold growth; the settle loop
+      // still self-corrects if anything above does shift.
+      const element = rootRef.current;
+      const container = element?.closest(
         "[class*='overflow-y-auto']",
       ) as HTMLElement | null;
-      if (!container) return;
-      requestAnimationFrame(() => {
-        container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-        // Charts keep resizing past this frame; nudge the target whenever the
-        // container grows, then stop once layout has been stable for a while.
-        let lastHeight = container.scrollHeight;
-        let stableFrames = 0;
-        const settle = () => {
-          if (container.scrollHeight !== lastHeight) {
-            lastHeight = container.scrollHeight;
-            stableFrames = 0;
-            container.scrollTo({
-              top: container.scrollHeight,
-              behavior: "smooth",
-            });
-          }
-          if (stableFrames++ < 45) requestAnimationFrame(settle);
-        };
-        requestAnimationFrame(settle);
-      });
+      if (!element || !container) return;
+      // Clamped so an unreachable target still counts as "arrived" once the
+      // container is scrolled as far as it can go.
+      const targetTop = () =>
+        Math.min(
+          element.getBoundingClientRect().top -
+            container.getBoundingClientRect().top +
+            container.scrollTop,
+          container.scrollHeight - container.clientHeight,
+        );
+      // Drive the animation by hand instead of scrollTo({behavior:"smooth"}):
+      // the browser cancels its own smooth scroll whenever the charts' async
+      // loads resize the layout mid-flight, which read as a stutter (or a
+      // strand partway down). Setting scrollTop directly each frame can't be
+      // cancelled, and re-reading the target each frame absorbs any layout
+      // shift without restarting the motion.
+      const DURATION_MS = 650;
+      const easeInOut = (t: number) =>
+        t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+      let cancelled = false;
+      const cancel = () => {
+        // Never fight the user: any manual scroll input hands control back.
+        cancelled = true;
+        container.removeEventListener("wheel", cancel);
+        container.removeEventListener("touchmove", cancel);
+      };
+      container.addEventListener("wheel", cancel, { passive: true });
+      container.addEventListener("touchmove", cancel, { passive: true });
+      const startTop = container.scrollTop;
+      let start: number | null = null;
+      const step = (now: number) => {
+        if (cancelled) return;
+        if (start === null) start = now;
+        const progress = Math.min((now - start) / DURATION_MS, 1);
+        container.scrollTop =
+          startTop + (targetTop() - startTop) * easeInOut(progress);
+        if (progress < 1) {
+          requestAnimationFrame(step);
+        } else {
+          cancel();
+        }
+      };
+      requestAnimationFrame(step);
     }
     window.addEventListener("creed:mcp-health-focus-agent", onFocusAgent);
     return () =>

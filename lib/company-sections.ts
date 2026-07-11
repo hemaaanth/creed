@@ -15,6 +15,7 @@ import {
 } from "@/lib/creed-permissions";
 import type { AgentPermission } from "@/lib/creed-data";
 import { actorLabel } from "@/lib/creed-attribution";
+import { getDisplayName } from "@/lib/user-name";
 import { richTextContentEquivalent } from "@/lib/rich-text";
 
 // Write path for company Creeds.
@@ -72,13 +73,7 @@ async function companyAccess(
 }
 
 function memberName(user: User): string {
-  const meta = user.user_metadata ?? {};
-  const raw =
-    (typeof meta.full_name === "string" && meta.full_name.trim()) ||
-    (typeof meta.name === "string" && meta.name.trim()) ||
-    (user.email ? user.email.split("@")[0] : "") ||
-    "Someone";
-  return raw;
+  return getDisplayName(user, "Someone");
 }
 
 type ActorType = "user" | "agent";

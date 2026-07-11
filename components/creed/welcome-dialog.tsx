@@ -275,7 +275,12 @@ function MediaFrame({
 
   return (
     <motion.div variants={lineVariants} className="px-7 pt-4 pb-0">
-      <div className="relative aspect-video w-full overflow-hidden rounded-[var(--radius-lg)] bg-[var(--creed-surface-raised)] ring-1 ring-inset ring-[var(--creed-border)]">
+      {/* max-h caps the 16:9 frame on short viewports so the whole dialog
+          fits inside its max-h instead of growing a scrollbar; 394px is the
+          frame's natural height at the dialog's 700px max width, so normal
+          screens are unaffected. Everything inside is absolutely positioned
+          (object-cover video, centered chip), so it degrades to a crop. */}
+      <div className="relative aspect-video max-h-[min(45dvh,394px)] w-full overflow-hidden rounded-[var(--radius-lg)] bg-[var(--creed-surface-raised)] ring-1 ring-inset ring-[var(--creed-border)]">
         {/* Whisper dot-grid, masked so it fades before the hairline ring. */}
         <div
           className="pointer-events-none absolute inset-0 opacity-50 dark:opacity-40 [mask-image:radial-gradient(ellipse_75%_75%_at_50%_45%,black_40%,transparent_100%)]"

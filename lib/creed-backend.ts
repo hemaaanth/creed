@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import "server-only";
 import { cache } from "react";
 import type { User } from "@supabase/supabase-js";
+import { getDisplayName } from "@/lib/user-name";
 import {
   buildAgentReadPayload,
   inferSectionTemplate,
@@ -275,14 +276,7 @@ function toDayLabel(timestamp?: string | null) {
 }
 
 export function getUserName(user: User) {
-  const metadata = user.user_metadata ?? {};
-  const direct =
-    metadata.full_name ||
-    metadata.name ||
-    metadata.user_name ||
-    (typeof user.email === "string" ? user.email.split("@")[0] : null);
-
-  return String(direct || "You");
+  return getDisplayName(user);
 }
 
 export function getAvatarUrl(user: User) {
@@ -353,8 +347,8 @@ function buildIntegrationSettings(
     ? false
     : Boolean(
         identityLogin ||
-          (typeof githubIdentity.sub === "string" && githubIdentity.sub.trim()) ||
-          (typeof githubIdentity.id === "string" && githubIdentity.id.trim()),
+        (typeof githubIdentity.sub === "string" && githubIdentity.sub.trim()) ||
+        (typeof githubIdentity.id === "string" && githubIdentity.id.trim()),
       );
 
   return {
@@ -721,13 +715,11 @@ function buildDirectEditUrl() {
 }
 
 function buildConnectionDefinitions() {
-  const mcpUrl = buildMcpUrl();
-  // Cursor supports a one-click install deep link; the config is the remote
-  // server URL (Cursor runs the OAuth flow itself, so no token is embedded).
-  const cursorConfig = Buffer.from(JSON.stringify({ url: mcpUrl })).toString(
-    "base64",
-  );
-  const cursorDeepLink = `cursor://anysphere.cursor-deeplink/mcp/install?name=creed&config=${encodeURIComponent(cursorConfig)}`;
+  // Per-agent buttons and command snippets are NOT built here: the client
+  // provider snapshots this payload once per page load, so presentation baked
+  // into it goes stale in open tabs under HMR. The cards derive their actions
+  // from lib/connection-actions.ts instead; these definitions carry identity,
+  // status, and fallback copy only.
   const remoteHint =
     "Add a custom MCP server pointing at the URL above, then authorize Creed in the browser window your client opens.";
 
@@ -757,7 +749,7 @@ function buildConnectionDefinitions() {
         description:
           "Add Creed as a remote MCP server for agentic coding runs.",
         connectHint:
-          "Run codex mcp add creed with the URL above, then codex mcp login creed to authorize in the browser.",
+          "Run the command below, then codex mcp login creed to authorize in the browser.",
       },
       {
         id: "claudecode",
@@ -766,7 +758,7 @@ function buildConnectionDefinitions() {
         description:
           "Connect Creed so every Claude Code session starts with your context.",
         connectHint:
-          "Run claude mcp add creed with the URL above, then /mcp to authorize in the browser.",
+          "Run the command below (user scope, so every project gets it), then /mcp to authorize in the browser.",
       },
       {
         id: "openclaw",
@@ -787,7 +779,8 @@ function buildConnectionDefinitions() {
         name: "Manus",
         icon: "manus",
         description: "Add Creed to Manus as a remote MCP server.",
-        connectHint: remoteHint,
+        connectHint:
+          "In Manus, open Settings > Connectors > Add custom MCP, enter the URL above with transport HTTP, then authorize.",
       },
       {
         id: "grok",
@@ -803,7 +796,7 @@ function buildConnectionDefinitions() {
         icon: "opencode",
         description: "Add Creed to OpenCode as a remote MCP server.",
         connectHint:
-          "Add the URL to opencode.json as a remote server, then run opencode mcp auth creed to authorize in the browser.",
+          "Add the JSON below to opencode.json, then run opencode mcp auth creed to authorize in the browser.",
       },
       {
         id: "cursor",
@@ -812,7 +805,6 @@ function buildConnectionDefinitions() {
         description: "One-click install Creed into Cursor, then authorize.",
         connectHint:
           "Use the one-click button to add Creed to Cursor as a remote MCP server, then authorize Creed in the browser window Cursor opens.",
-        deepLink: cursorDeepLink,
       },
       {
         id: "devin",
@@ -820,7 +812,7 @@ function buildConnectionDefinitions() {
         icon: "devin",
         description: "Add Creed to Devin from the MCP Marketplace.",
         connectHint:
-          "In Devin, open Settings > MCP Marketplace, add your own MCP with the URL above and OAuth, then authorize.",
+          "In Devin, open Settings > Connections > MCP servers, add a custom MCP with the URL above then transport HTTP and OAuth.",
       },
       {
         id: "replit",
@@ -828,7 +820,7 @@ function buildConnectionDefinitions() {
         icon: "replit",
         description: "Add Creed to Replit as a remote MCP server.",
         connectHint:
-          "In Replit, open the Agent's MCP settings, add a remote MCP server with the URL above, and authorize Creed with OAuth.",
+          "In Replit, open the Agent's Integrations pane, add a custom MCP server with the URL above, and authorize Creed with OAuth.",
       },
       {
         id: "whirl",
@@ -844,7 +836,7 @@ function buildConnectionDefinitions() {
         icon: "factory",
         description: "Add Creed to Factory's droid as a remote MCP server.",
         connectHint:
-          "In droid, run /mcp, add a remote server with the URL above, then authorize in the browser.",
+          "Run the command below, then /mcp inside droid to authorize in the browser.",
       },
       {
         id: "v0",
@@ -1388,9 +1380,13 @@ async function loadCreedStateImpl(
       ).filter((entry) => !isNoopActivityEntry(entry)),
       settings: {
         requireApproval: tokenRow.require_approval,
-        integrations: buildIntegrationSettings(resolvedUser, githubIntegration, {
-          ignoreLinkedIdentity: true,
-        }),
+        integrations: buildIntegrationSettings(
+          resolvedUser,
+          githubIntegration,
+          {
+            ignoreLinkedIdentity: true,
+          },
+        ),
         versionControl: buildVersionControlSettings(versionControl),
       },
       connections: definitions.map((definition) => {
@@ -1485,7 +1481,11 @@ export async function loadCompanyCreedState(
     .select("name, company_email, avatar_url")
     .eq("id", creedId)
     .maybeSingle()) as {
-    data: { name?: string; company_email?: string | null; avatar_url?: string | null } | null;
+    data: {
+      name?: string;
+      company_email?: string | null;
+      avatar_url?: string | null;
+    } | null;
     error: unknown;
   };
   const creedResult = creedWithAvatar.error

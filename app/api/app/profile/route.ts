@@ -12,8 +12,13 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Invalid name" }, { status: 400 });
   }
 
+  // display_name is the key the app reads first (see lib/user-name.ts): OAuth
+  // logins refresh name/full_name from the provider's identity, so a custom
+  // name stored only there gets clobbered on the next Google sign-in. The
+  // legacy keys are still written for anything external that reads them.
   const { data, error } = await auth.supabase.auth.updateUser({
     data: {
+      display_name: name,
       name,
       full_name: name,
     },

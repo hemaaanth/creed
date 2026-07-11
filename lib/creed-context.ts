@@ -9,6 +9,7 @@ import {
   type CreedSummary,
 } from "@/lib/creed-membership";
 import type { CreedRole } from "@/lib/creed-permissions";
+import { getDisplayName } from "@/lib/user-name";
 
 // Active-Creed resolution.
 //
@@ -168,11 +169,7 @@ export async function ensurePersonalCreedId(
       };
     };
   };
-  const name =
-    (typeof user.user_metadata?.full_name === "string" && user.user_metadata.full_name.trim()) ||
-    (typeof user.user_metadata?.name === "string" && user.user_metadata.name.trim()) ||
-    (user.email ? user.email.split("@")[0] : "") ||
-    "Your Creed";
+  const name = getDisplayName(user, "Your Creed");
 
   const { data, error } = await admin
     .from("creeds")

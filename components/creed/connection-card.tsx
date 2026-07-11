@@ -30,7 +30,12 @@ import {
   AnimatedMenuIconItem,
 } from "@/components/creed/animated-icon-action";
 import { IntegrationGlyph } from "@/components/creed/brand";
-import type { ConnectionItem, McpClient } from "@/lib/creed-data";
+import { getConnectionPresentation } from "@/lib/connection-actions";
+import type {
+  ConnectionAction,
+  ConnectionItem,
+  McpClient,
+} from "@/lib/creed-data";
 import { cn } from "@/lib/utils";
 
 // Where each agent lives, for the kebab's "Open" action. Agents without a
@@ -105,9 +110,8 @@ function getAgentButtonClasses(connectionId: string) {
     case "opencode":
     case "factory":
     case "manus":
-      return "bg-[#171717] text-white hover:bg-[#0F0F0F] dark:bg-[#e7e7e2] dark:text-[#0e0e0d] dark:hover:bg-[#cfcfc8]";
     case "custom":
-      return "border border-[var(--creed-border-strong)] bg-[var(--creed-surface)] text-[var(--creed-text-primary)] hover:bg-[var(--creed-surface-raised)]";
+      return "bg-[#171717] text-white hover:bg-[#0F0F0F] dark:bg-[#e7e7e2] dark:text-[#0e0e0d] dark:hover:bg-[#cfcfc8]";
     default:
       return "bg-[var(--creed-text-primary)] text-[var(--creed-button-primary-fg)] hover:bg-[var(--creed-button-primary-hover)]";
   }
@@ -129,9 +133,9 @@ export function resolveConnectionStatus(
 }
 
 // One per-agent connect card, used on both /connections and the onboarding
-// Connect step. Self-contained: it manages its own copy/flash state and chooses
-// the action by what the connection offers (deep link -> "Add MCP", otherwise
-// "Copy URL").
+// Connect step. Self-contained: it manages its own copy/flash state and renders
+// the connection's primary/secondary actions (install link, settings page, or
+// copyable command/JSON/URL), falling back to a plain "Copy URL".
 export function ConnectionCard({
   connection,
   mcpUrl,
@@ -150,7 +154,11 @@ export function ConnectionCard({
   // Jump to the Health section filtered to this agent.
   onLogs?: () => void;
 }) {
-  const [flashed, setFlashed] = useState(false);
+  // Which button is showing its "Copied"/"Added" flash; primary and secondary
+  // flash independently.
+  const [flashedSlot, setFlashedSlot] = useState<
+    "primary" | "secondary" | null
+  >(null);
   const [testState, setTestState] = useState<
     "idle" | "testing" | "ok" | "fail"
   >("idle");
@@ -171,18 +179,98 @@ export function ConnectionCard({
     }
     window.setTimeout(() => setTestState("idle"), 1600);
   };
-  const flash = () => {
-    setFlashed(true);
-    window.setTimeout(() => setFlashed(false), 1600);
-  };
-  const copy = async (value: string) => {
-    await navigator.clipboard.writeText(value);
-    flash();
+  const flash = (slot: "primary" | "secondary") => {
+    setFlashedSlot(slot);
+    window.setTimeout(
+      () => setFlashedSlot((current) => (current === slot ? null : current)),
+      1600,
+    );
   };
   const buttonClass = cn(
     "min-w-[116px] justify-center rounded-md px-4",
     getAgentButtonClasses(connection.id),
   );
+  const secondaryButtonClass =
+    "min-w-[116px] justify-center rounded-md border border-[var(--creed-border-strong)] bg-[var(--creed-surface)] px-4 text-[var(--creed-text-primary)] hover:bg-[var(--creed-surface-raised)]";
+
+  // Buttons and hint are derived client-side from the agent id + MCP URL (see
+  // lib/connection-actions.ts for why they don't ride the server payload),
+  // with the server definition as fallback and a plain Copy URL as the floor.
+  const presentation = getConnectionPresentation(connection.id, mcpUrl);
+  const primaryAction: ConnectionAction = presentation.primary ??
+    connection.primaryAction ?? {
+      kind: "copy",
+      label: "Copy URL",
+      value: mcpUrl,
+    };
+  const secondaryAction =
+    presentation.secondary ?? connection.secondaryAction ?? null;
+  const connectHint = presentation.hint ?? connection.connectHint;
+
+  const renderAction = (
+    action: ConnectionAction,
+    slot: "primary" | "secondary",
+  ) => {
+    const flashed = flashedSlot === slot;
+    const className = slot === "primary" ? buttonClass : secondaryButtonClass;
+    if (action.kind === "open") {
+      // Settings pages open in a new tab; no flash, the destination is the
+      // feedback.
+      return (
+        <AnimatedIconButton
+          icon={ArrowUpRightIcon}
+          className={className}
+          onClick={() => {
+            window.open(action.href, "_blank", "noopener,noreferrer");
+          }}
+        >
+          {action.label}
+        </AnimatedIconButton>
+      );
+    }
+    if (action.kind === "install") {
+      return (
+        <AnimatedIconButton
+          icon={PlusIcon}
+          showIcon={!flashed}
+          className={className}
+          onClick={() => {
+            flash(slot);
+            window.location.href = action.href;
+          }}
+        >
+          {flashed ? (
+            <>
+              <AnimatedCheckmark className="h-4 w-4" size={16} />
+              Added
+            </>
+          ) : (
+            action.label
+          )}
+        </AnimatedIconButton>
+      );
+    }
+    return (
+      <AnimatedIconButton
+        icon={CopyIcon}
+        showIcon={!flashed}
+        className={className}
+        onClick={async () => {
+          await navigator.clipboard.writeText(action.value);
+          flash(slot);
+        }}
+      >
+        {flashed ? (
+          <>
+            <AnimatedCheckmark className="h-4 w-4" size={16} />
+            Copied
+          </>
+        ) : (
+          action.label
+        )}
+      </AnimatedIconButton>
+    );
+  };
 
   return (
     <div className="flex h-auto flex-col self-start rounded-[14px] border border-[var(--creed-border)] bg-[var(--creed-surface)] p-4">
@@ -315,49 +403,12 @@ export function ConnectionCard({
       </div>
 
       <p className="mt-4 text-[13px] leading-6 text-[var(--creed-text-secondary)]">
-        {connection.connectHint}
+        {connectHint}
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        {connection.deepLink ? (
-          <AnimatedIconButton
-            icon={PlusIcon}
-            showIcon={!flashed}
-            className={buttonClass}
-            onClick={() => {
-              const href = connection.deepLink ?? "";
-              flash();
-              if (href) {
-                window.location.href = href;
-              }
-            }}
-          >
-            {flashed ? (
-              <>
-                <AnimatedCheckmark className="h-4 w-4" size={16} />
-                Added
-              </>
-            ) : (
-              "Add MCP"
-            )}
-          </AnimatedIconButton>
-        ) : (
-          <AnimatedIconButton
-            icon={CopyIcon}
-            showIcon={!flashed}
-            className={buttonClass}
-            onClick={() => copy(mcpUrl)}
-          >
-            {flashed ? (
-              <>
-                <AnimatedCheckmark className="h-4 w-4" size={16} />
-                Copied
-              </>
-            ) : (
-              "Copy URL"
-            )}
-          </AnimatedIconButton>
-        )}
+        {renderAction(primaryAction, "primary")}
+        {secondaryAction ? renderAction(secondaryAction, "secondary") : null}
       </div>
 
       {onRevoke ? (
