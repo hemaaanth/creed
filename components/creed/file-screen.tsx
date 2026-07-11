@@ -31,6 +31,7 @@ import {
 import { toast } from "sonner";
 import { fireConfetti } from "@/lib/confetti";
 import { AnimatedCheckmark } from "@/components/ui/animated-checkmark";
+import { SectionHistorySheet } from "@/components/creed/section-history-sheet";
 import { AlignLeftIcon } from "@/components/ui/align-left";
 import { ArchiveIcon } from "@/components/ui/archive";
 import { Button } from "@/components/ui/button";
@@ -790,6 +791,7 @@ export function FileScreen() {
     importSections,
     exportMarkdown,
     refreshState,
+    sectionPresence,
   } = useCreed();
   // Company role gates. In personal mode the sole user is effectively the owner.
   // Managers (owner/admin) create sections; plain members cannot. Section
@@ -917,6 +919,11 @@ export function FileScreen() {
   const [fileViewMode, setFileViewMode] = useState<"editor" | "nexus">(
     "editor",
   );
+  // Version-history sheet target (company owner/admin only).
+  const [historySectionState, setHistorySectionState] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [renameSectionState, setRenameSectionState] = useState<{
     id: string;
     name: string;
@@ -2646,6 +2653,7 @@ export function FileScreen() {
                         <SectionCard
                           key={section.id}
                           section={section}
+                          editingBy={sectionPresence[section.id]}
                           sectionTagTargets={visibleSectionTagTargets}
                           locked={sectionLocked}
                           proposeMode={proposeMode}
@@ -2698,6 +2706,15 @@ export function FileScreen() {
                               id: section.id,
                               name: section.name,
                             })
+                          }
+                          onHistory={
+                            state.creedType === "company" && isCompanyManager
+                              ? () =>
+                                  setHistorySectionState({
+                                    id: section.id,
+                                    name: section.name,
+                                  })
+                              : undefined
                           }
                           onCopy={() => {
                             void navigator.clipboard.writeText(
@@ -3018,6 +3035,17 @@ export function FileScreen() {
         </DialogContent>
       </Dialog>
 
+      {historySectionState && state.creedId ? (
+        <SectionHistorySheet
+          open
+          onOpenChange={(open) => !open && setHistorySectionState(null)}
+          creedId={state.creedId}
+          sectionId={historySectionState.id}
+          sectionName={historySectionState.name}
+          onRestored={() => void refreshState()}
+        />
+      ) : null}
+
       <Dialog
         open={Boolean(renameSectionState)}
         onOpenChange={(open) => !open && setRenameSectionState(null)}
@@ -3173,6 +3201,7 @@ export function FileScreen() {
 
 function SectionCard({
   section,
+  editingBy,
   sectionTagTargets,
   locked,
   proposeMode = false,
@@ -3194,6 +3223,7 @@ function SectionCard({
   onWithdrawProposal,
   onChangeRichText,
   onRename,
+  onHistory,
   onSetAccent,
   onCopy,
   onDelete,
@@ -3201,6 +3231,8 @@ function SectionCard({
   onAddSectionAfter,
 }: {
   section: CreedSection;
+  // Company only: names of other members currently editing this section.
+  editingBy?: string[];
   sectionTagTargets: Array<{ id: string; name: string; accent?: AccentKey }>;
   locked: boolean;
   // Company Proposal-only: edits are buffered locally and submitted as a
@@ -3231,6 +3263,9 @@ function SectionCard({
   onWithdrawProposal: (proposalId: string) => void;
   onChangeRichText: (content: string) => void;
   onRename: () => void;
+  // Opens the version-history sheet; company owner/admin only, so the item
+  // is hidden when absent.
+  onHistory?: () => void;
   onSetAccent: (accent: AccentKey) => void;
   onCopy: () => void;
   onDelete: () => void;
@@ -3326,6 +3361,17 @@ function SectionCard({
                   actionAvailable={Boolean(qualityDirty)}
                   onAction={onRefreshQuality}
                 />
+                {editingBy && editingBy.length > 0 ? (
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--creed-border)] bg-[var(--creed-surface-raised)] px-2 py-1 text-[11px] leading-none text-[var(--creed-text-secondary)]"
+                    title={`${editingBy.join(", ")} ${editingBy.length === 1 ? "is" : "are"} editing this section`}
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#F59E0B]" />
+                    {editingBy[0]}
+                    {editingBy.length > 1 ? ` +${editingBy.length - 1}` : ""}
+                    {" editing"}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   aria-label={
@@ -3514,6 +3560,19 @@ function SectionCard({
                   >
                     Copy
                   </AnimatedMenuIconItem>
+                  {onHistory ? (
+                    <AnimatedMenuIconItem
+                      icon={HistoryIcon}
+                      className="text-sm"
+                      onSelect={() =>
+                        // Defer so the menu closes before the dialog opens,
+                        // letting the dialog play its enter animation.
+                        window.setTimeout(onHistory, 0)
+                      }
+                    >
+                      History
+                    </AnimatedMenuIconItem>
+                  ) : null}
                   {onArchive ? (
                     <>
                       <DropdownMenuSeparator />

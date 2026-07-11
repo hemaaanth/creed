@@ -97,7 +97,13 @@ function memberName(user: User): string {
 }
 
 type ActorType = "user" | "agent";
-type WriteCause = "manual" | "mcp" | "proposal" | "import" | "onboarding";
+type WriteCause =
+  | "manual"
+  | "mcp"
+  | "proposal"
+  | "import"
+  | "onboarding"
+  | "restore";
 
 type Actor = {
   userId: string;
@@ -1590,6 +1596,137 @@ function translatePersonalDraft(raw: ProposalDraft): CompanyDraft | null {
     return { kind: "rich-text", accent: draft.accent };
   }
   return null;
+}
+
+export type SectionVersionEntry = {
+  id: number;
+  revision: number;
+  name: string;
+  cause: string;
+  actorType: string;
+  agentName: string | null;
+  createdAt: string;
+};
+
+/** List a section's stored versions, newest first (owner/admin only). */
+export async function listSectionVersions(params: {
+  creedId: string;
+  user: User;
+  sectionId: string;
+}): Promise<
+  { ok: true; versions: SectionVersionEntry[] } | SectionWriteError
+> {
+  const db = admin();
+  const role = await getCreedRole(db, params.user.id, params.creedId);
+  if (role !== "owner" && role !== "admin") {
+    return {
+      ok: false,
+      code: "forbidden",
+      error: "Only an owner or admin can view section history.",
+    };
+  }
+  const { data } = (await db
+    .from("creed_section_versions")
+    .select("id, revision, name, cause, actor_type, agent_name, created_at")
+    .eq("creed_id", params.creedId)
+    .eq("section_id", params.sectionId)
+    .order("id", { ascending: false })
+    .limit(100)) as {
+    data: Array<{
+      id: number;
+      revision: number;
+      name: string;
+      cause: string;
+      actor_type: string;
+      agent_name: string | null;
+      created_at: string;
+    }> | null;
+  };
+  return {
+    ok: true,
+    versions: (data ?? []).map((row) => ({
+      id: row.id,
+      revision: row.revision,
+      name: row.name,
+      cause: row.cause,
+      actorType: row.actor_type,
+      agentName: row.agent_name,
+      createdAt: row.created_at,
+    })),
+  };
+}
+
+/**
+ * Restore a stored version by writing its content/name/accent as a NEW
+ * revision via the shared applyDraft (cause "restore") - history is never
+ * destroyed, so a restore can itself be undone. Owner/admin only.
+ */
+export async function restoreSectionVersion(params: {
+  creedId: string;
+  user: User;
+  sectionId: string;
+  versionId: number;
+}): Promise<SectionWriteResult> {
+  const { creedId, user, sectionId, versionId } = params;
+  const db = admin();
+  const role = await getCreedRole(db, user.id, creedId);
+  if (role !== "owner" && role !== "admin") {
+    return {
+      ok: false,
+      code: "forbidden",
+      error: "Only an owner or admin can restore a version.",
+    };
+  }
+  if ((await companyAccess(creedId)) === "frozen") {
+    return {
+      ok: false,
+      code: "frozen",
+      error: "This company is read-only until billing is fixed.",
+    };
+  }
+  const { data: version } = (await db
+    .from("creed_section_versions")
+    .select("content, name, accent")
+    .eq("creed_id", creedId)
+    .eq("section_id", sectionId)
+    .eq("id", versionId)
+    .maybeSingle()) as {
+    data: { content: string; name: string; accent: string } | null;
+  };
+  if (!version) {
+    return { ok: false, code: "not_found", error: "Version not found." };
+  }
+  const applied = await applyDraft({
+    creedId,
+    sectionId,
+    draft: {
+      kind: "rich-text",
+      contentHtml: version.content,
+      name: version.name,
+      accent: version.accent,
+    },
+    actor: describeActor(user, null),
+    cause: "restore",
+  });
+  if (!applied.ok) return applied;
+  if (!applied.noop) {
+    const actorName = memberName(user);
+    await writeActivity({
+      creedId,
+      sectionId: applied.sectionId,
+      sectionName: applied.sectionName,
+      accent: applied.accent,
+      actorUserId: user.id,
+      actorType: "user",
+      actorName,
+      summary: `${actorName} restored an earlier version of ${applied.sectionName}`,
+      status: "accepted",
+      eventKind: "edit",
+      beforeText: applied.before,
+      afterText: applied.after,
+    });
+  }
+  return { ok: true, revision: applied.revision };
 }
 
 /** Permanently delete a section (owner/admin, from the app). */

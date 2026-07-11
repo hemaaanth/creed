@@ -45,11 +45,14 @@ import {
   type ProposalDraft,
 } from "@/lib/creed-data";
 import { normalizeRichTextInput, richTextContentEquivalent } from "@/lib/rich-text";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { toast } from "sonner";
 
 type CreedContextValue = {
   state: CreedState;
+  // Company only: sectionId -> names of OTHER members editing it right now.
+  sectionPresence: Record<string, string[]>;
   toggleLock: () => void;
   toggleSectionLock: (sectionId: string) => void;
   updateRichTextSection: (sectionId: string, content: string) => void;
@@ -110,6 +113,9 @@ const EXTERNAL_SYNC_INTERVAL_MS = 30_000;
 // surface on everyone's screen quickly - poll far more often than the personal
 // single-user case. Focus/visibility refetches still make tab-switches instant.
 const COMPANY_SYNC_INTERVAL_MS = 5_000;
+// How long after a local company mutation syncs keep the full local-sections
+// freeze (covers optimistic structural POSTs still in flight).
+const COMPANY_MUTATION_QUIET_MS = 8_000;
 
 function nextMutationTick(state: CreedState) {
   return {
@@ -160,6 +166,18 @@ function mergeExternalState(
   // re-running this merge (React StrictMode double-invokes updaters) yields
   // the same result.
   resolvedProposalIds: Set<string>,
+  // Section ids with an unsaved local company edit (debounce timer pending,
+  // save in flight, marked dirty, or an optimistic create whose POST hasn't
+  // landed). These keep their local copy when a company sync merges - and are
+  // preserved outright when the server payload doesn't know them yet.
+  pendingSectionIds: Set<string>,
+  // True while a recent local company mutation may still have its POST in
+  // flight (accept-proposal content, archive, reorder, rename...). Structural
+  // mutations don't ride the per-section save bookkeeping, so a sync landing
+  // inside this window falls back to the old full local-sections freeze
+  // instead of reverting them; once the window passes, the per-section merge
+  // below takes over and teammates' edits flow in.
+  recentLocalCompanyMutation: boolean,
 ) {
   const incomingPendingIds = new Set(
     incoming.proposals
@@ -174,6 +192,51 @@ function mergeExternalState(
   const proposals = incoming.proposals.filter(
     (proposal) => !resolvedProposalIds.has(proposal.id),
   );
+
+  // Sections: personal keeps ALL local sections while any mutation is
+  // unpersisted - the full-state PUT owns the truth, and the tick resets when
+  // it lands. Company saves are per-section and server-authoritative, and
+  // nothing ever reconciles the personal-path tick in company mode, so the
+  // old all-or-nothing gate froze a company session's sections at the first
+  // keystroke: teammates' edits never appeared again until a reload. Instead:
+  // - inside the recent-mutation window, keep the full freeze (see param doc);
+  // - otherwise sections with a pending local edit keep their local copy,
+  //   local-only pending sections (optimistic creates; a section a teammate
+  //   deleted mid-edit) are preserved at their local position, and everything
+  //   else follows the server.
+  const isCompany = incoming.creedType === "company";
+  const replaceCompanySections = isCompany && !recentLocalCompanyMutation;
+  let sections: CreedState["sections"];
+  if (canReplaceSections) {
+    sections = incoming.sections;
+  } else if (replaceCompanySections) {
+    const incomingIds = new Set(incoming.sections.map((section) => section.id));
+    sections = incoming.sections.map(
+      (section) =>
+        (pendingSectionIds.has(section.id)
+          ? current.sections.find((item) => item.id === section.id)
+          : null) ?? section,
+    );
+    for (const [index, section] of current.sections.entries()) {
+      if (pendingSectionIds.has(section.id) && !incomingIds.has(section.id)) {
+        sections.splice(Math.min(index, sections.length), 0, section);
+      }
+    }
+  } else {
+    sections = current.sections;
+  }
+  const sectionRevisions = canReplaceSections
+    ? incoming.sectionRevisions
+    : replaceCompanySections
+      ? {
+          ...incoming.sectionRevisions,
+          ...Object.fromEntries(
+            Array.from(pendingSectionIds)
+              .filter((id) => current.sectionRevisions[id] != null)
+              .map((id) => [id, current.sectionRevisions[id]]),
+          ),
+        }
+      : current.sectionRevisions;
 
   return {
     ...current,
@@ -193,7 +256,7 @@ function mergeExternalState(
     mcpLastUsed: incoming.mcpLastUsed,
     mcpLastClientName: incoming.mcpLastClientName,
     mcpClients: incoming.mcpClients,
-    sections: canReplaceSections ? incoming.sections : current.sections,
+    sections,
     // Server proposals win (minus the locally-resolved set above): preferring
     // local copies while edits were unpersisted masked genuine server-side
     // transitions (an agent revising a draft, a teammate's accept marking a
@@ -202,9 +265,7 @@ function mergeExternalState(
     activity: incoming.activity,
     settings: canReplaceSections ? incoming.settings : current.settings,
     connections: incoming.connections,
-    sectionRevisions: canReplaceSections
-      ? incoming.sectionRevisions
-      : current.sectionRevisions,
+    sectionRevisions,
   };
 }
 
@@ -382,6 +443,146 @@ export function CreedProvider({
   // Proposal ids resolved locally whose resolution hasn't been confirmed by
   // the server yet - see mergeExternalState. Cleared wholesale on Creed switch.
   const resolvedProposalIdsRef = useRef<Set<string>>(new Set());
+  // Cross-tab sync: the same account in two tabs is otherwise last-write-wins
+  // on the personal full-state PUT (and up to a poll interval stale). Each
+  // successful save announces itself; other tabs on the same Creed resync
+  // immediately instead of waiting for their poll.
+  const syncChannelRef = useRef<BroadcastChannel | null>(null);
+  // Company sections whose save failed (network throw or 5xx), re-run when
+  // connectivity returns or after a short backoff (see the retry effect).
+  const offlineRetrySectionsRef = useRef<Set<string>>(new Set());
+  const offlineRetryTimerRef = useRef<number | null>(null);
+  // Optimistic company creates whose POST hasn't landed - the merge preserves
+  // these local-only sections instead of deleting them.
+  const pendingCreatedSectionIdsRef = useRef<Set<string>>(new Set());
+  // Stamped by every company commitState; syncs landing within a short window
+  // of a local mutation keep the full local-sections freeze so in-flight
+  // structural POSTs (accept, archive, reorder, rename) can't be reverted.
+  const lastCompanyMutationAtRef = useRef(0);
+  // Latest runCompanySave, so effects can call it without depending on a
+  // function that is re-created every render.
+  const runCompanySaveRef = useRef<((sectionId: string) => Promise<void>) | null>(
+    null,
+  );
+  // Company presence: which sections OTHER members are editing right now
+  // (sectionId -> display names), via a Supabase Realtime presence channel.
+  // Lets collisions be avoided socially - the section header shows "X is
+  // editing" - since same-section concurrent edits are whole-section
+  // last-write-wins.
+  const [sectionPresence, setSectionPresence] = useState<
+    Record<string, string[]>
+  >({});
+  const presenceChannelRef = useRef<RealtimeChannel | null>(null);
+  const presenceIdleTimerRef = useRef<number | null>(null);
+  // The section we've announced (null once idle-cleared). Presence state
+  // persists server-side until untrack/leave, so we only re-track when the
+  // section actually changes - keystrokes merely push the idle deadline out,
+  // keeping the websocket quiet during long writing sessions.
+  const presenceTrackedSectionRef = useRef<string | null>(null);
+  const presenceLastJsonRef = useRef("");
+
+  useEffect(() => {
+    if (state.creedType !== "company" || !state.creedId) {
+      setSectionPresence({});
+      return;
+    }
+    const supabase = getSupabaseBrowserClient();
+    // Keyed by email so a member's multiple tabs collapse to one presence;
+    // the random fallback keeps two email-less members from sharing a key
+    // (which would make them invisible to each other and clobber each
+    // other's announcements). Read via latestStateRef so a profile rename
+    // doesn't tear the channel down mid-session.
+    const user = latestStateRef.current.user;
+    const presenceKey =
+      user.email || user.handle || `member-${Math.random().toString(36).slice(2, 10)}`;
+    const channel = supabase.channel(`presence:creed:${state.creedId}`, {
+      config: { presence: { key: presenceKey } },
+    });
+    presenceChannelRef.current = channel;
+    const recompute = () => {
+      const raw = channel.presenceState() as Record<
+        string,
+        Array<{ name?: string; sectionId?: string | null }>
+      >;
+      const next: Record<string, string[]> = {};
+      for (const [key, metas] of Object.entries(raw)) {
+        if (key === presenceKey) continue;
+        for (const meta of metas) {
+          if (!meta?.sectionId || !meta.name) continue;
+          const names = (next[meta.sectionId] ??= []);
+          if (!names.includes(meta.name)) names.push(meta.name);
+        }
+      }
+      // Presence syncs fire for every member's track/untrack; most produce an
+      // identical map. Bail before setState so they don't re-render the app.
+      const json = JSON.stringify(next);
+      if (json === presenceLastJsonRef.current) return;
+      presenceLastJsonRef.current = json;
+      setSectionPresence(next);
+    };
+    channel.on("presence", { event: "sync" }, recompute).subscribe((status: string) => {
+      // If the user started typing before the join handshake finished, that
+      // early track() was dropped - announce again now that we're joined.
+      if (status === "SUBSCRIBED" && presenceTrackedSectionRef.current) {
+        void channel.track({
+          name: latestStateRef.current.user.name,
+          sectionId: presenceTrackedSectionRef.current,
+        });
+      }
+    });
+    return () => {
+      presenceChannelRef.current = null;
+      presenceTrackedSectionRef.current = null;
+      presenceLastJsonRef.current = "";
+      if (presenceIdleTimerRef.current !== null) {
+        window.clearTimeout(presenceIdleTimerRef.current);
+        presenceIdleTimerRef.current = null;
+      }
+      void supabase.removeChannel(channel);
+      setSectionPresence({});
+    };
+  }, [state.creedType, state.creedId]);
+
+  // Announce "I'm editing section X". Called from the company typing path.
+  // Sends a frame only when the tracked section changes; every keystroke
+  // resets the idle timer, and after 20s of quiet the announcement is cleared
+  // so a closed laptop doesn't show as editing forever (leaving the channel
+  // also clears it server-side).
+  function trackEditingPresence(sectionId: string) {
+    const channel = presenceChannelRef.current;
+    if (!channel) return;
+    if (presenceIdleTimerRef.current !== null) {
+      window.clearTimeout(presenceIdleTimerRef.current);
+    }
+    presenceIdleTimerRef.current = window.setTimeout(() => {
+      presenceTrackedSectionRef.current = null;
+      void presenceChannelRef.current?.track({
+        name: latestStateRef.current.user.name,
+        sectionId: null,
+      });
+    }, 20_000);
+    if (presenceTrackedSectionRef.current === sectionId) return;
+    presenceTrackedSectionRef.current = sectionId;
+    void channel
+      .track({ name: latestStateRef.current.user.name, sectionId })
+      .then((status) => {
+        // A failed track (e.g. channel still joining) must not stick: clear
+        // the marker so the next keystroke (or the SUBSCRIBED callback above)
+        // re-announces.
+        if (status !== "ok" && presenceTrackedSectionRef.current === sectionId) {
+          presenceTrackedSectionRef.current = null;
+        }
+      });
+  }
+  const broadcastStateChanged = useCallback(() => {
+    const creedId = latestStateRef.current.creedId;
+    if (!creedId) return;
+    try {
+      syncChannelRef.current?.postMessage({ creedId });
+    } catch {
+      // Channel closed mid-teardown; the other tab's poll still covers it.
+    }
+  }, []);
   // Company mode saves per section (not the full-state PUT). One debounce timer
   // per section id.
   const companySaveTimers = useRef<Map<string, number>>(new Map());
@@ -428,6 +629,7 @@ export function CreedProvider({
       try {
         await persistState(snapshot, keepalive);
         lastPersistedTickRef.current = snapshot.mutationTick;
+        broadcastStateChanged();
         setState((current) =>
           // Only the latest write clears the indicator and stamps the save time;
           // if a newer edit is already in flight, leave saving on for its flush.
@@ -446,7 +648,7 @@ export function CreedProvider({
         );
       }
     },
-    [persistState],
+    [persistState, broadcastStateChanged],
   );
 
   function schedulePersist(snapshot: CreedState) {
@@ -467,6 +669,9 @@ export function CreedProvider({
   }
 
   function commitState(updater: (current: CreedState) => CreedState) {
+    if (latestStateRef.current.creedType === "company") {
+      lastCompanyMutationAtRef.current = Date.now();
+    }
     setState((current) => {
       const nextState = updater(current);
       const shouldPersist =
@@ -493,6 +698,9 @@ export function CreedProvider({
   async function runCompanySectionCreate(section: CreedSection, afterSectionId?: string) {
     const creedId = latestStateRef.current.creedId;
     if (!creedId) return;
+    // Until the POST lands the section exists only locally; keep it out of
+    // the merge's reach so a racing sync can't delete it mid-typing.
+    pendingCreatedSectionIdsRef.current.add(section.id);
     try {
       const res = await fetch("/api/app/sections", {
         method: "POST",
@@ -511,6 +719,9 @@ export function CreedProvider({
         error?: string;
       };
       if (!res.ok) {
+        // Un-pend before the reconcile sync so the rejected optimistic
+        // section is actually removed rather than preserved by the merge.
+        pendingCreatedSectionIdsRef.current.delete(section.id);
         toast.error(data.error ?? "The section could not be created.");
         await syncFromServer();
         return;
@@ -523,8 +734,64 @@ export function CreedProvider({
         },
       }));
     } catch {
+      pendingCreatedSectionIdsRef.current.delete(section.id);
       toast.error("The section could not be created.");
       await syncFromServer();
+    } finally {
+      pendingCreatedSectionIdsRef.current.delete(section.id);
+    }
+  }
+
+  // Persist a company section's metadata (name / accent) through the same
+  // per-section PUT the content autosave uses. These were previously only
+  // committed locally in company mode - the old frozen merge hid it, so a
+  // rename looked applied all session and silently vanished on reload.
+  async function saveCompanySectionMeta(
+    sectionId: string,
+    fields: { name?: string; accent?: string },
+  ) {
+    const creedId = latestStateRef.current.creedId;
+    if (!creedId) return;
+    const put = async (baseRevision: number) => {
+      const response = await fetch(
+        `/api/app/sections/${encodeURIComponent(sectionId)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ creedId, baseRevision, ...fields }),
+        },
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        revision?: number;
+        error?: string;
+        currentRevision?: number;
+      };
+      return { response, data };
+    };
+    try {
+      const baseRevision =
+        latestStateRef.current.sectionRevisions[sectionId] ?? 1;
+      let { response, data } = await put(baseRevision);
+      // Same silent single retry as the content autosave: a metadata change
+      // rarely conflicts with anything but our own prior save.
+      if (response.status === 409 && typeof data.currentRevision === "number") {
+        ({ response, data } = await put(data.currentRevision));
+      }
+      if (!response.ok) {
+        toast.error(data.error ?? "Could not save the section.");
+        await syncFromServer();
+        return;
+      }
+      setState((s) => ({
+        ...s,
+        sectionRevisions: {
+          ...s.sectionRevisions,
+          [sectionId]: data.revision ?? s.sectionRevisions[sectionId] ?? 1,
+        },
+      }));
+      broadcastStateChanged();
+    } catch {
+      toast.error("Could not save the section.");
     }
   }
 
@@ -643,6 +910,9 @@ export function CreedProvider({
           // clobber. Rare (needs a real concurrent writer, not our own save).
           toast.error("This section changed elsewhere. Reloading it.");
           await syncFromServer();
+        } else if (response.status >= 500) {
+          // Server hiccup: same recovery as a network failure.
+          queueSectionRetry(sectionId);
         } else {
           toast.error(data.error ?? "Could not save the section.");
         }
@@ -660,21 +930,35 @@ export function CreedProvider({
           [sectionId]: data.revision ?? s.sectionRevisions[sectionId] ?? 1,
         },
       }));
+      broadcastStateChanged();
     } catch {
-      toast.error("Could not save the section.");
+      // Network-level failure (fetch threw): queue the section for a re-save
+      // instead of only toasting into the void.
+      queueSectionRetry(sectionId);
     } finally {
       companySaveInFlight.current.delete(sectionId);
       // Typing landed while we were saving - persist the newest content now,
       // with the revision we just learned, and keep the "Saving" indicator on
-      // through the re-run (no flicker). Otherwise settle to "Saved".
+      // through the re-run (no flicker). Otherwise settle to "Saved" - but
+      // only once NO section has a save pending, so rapid edits across
+      // several sections don't strobe the indicator.
       if (companySaveDirty.current.has(sectionId)) {
         companySaveDirty.current.delete(sectionId);
         void runCompanySave(sectionId);
-      } else {
+      } else if (
+        companySaveInFlight.current.size === 0 &&
+        companySaveTimers.current.size === 0 &&
+        companySaveDirty.current.size === 0
+      ) {
         setState((s) => (s.saving ? { ...s, saving: false } : s));
       }
     }
   }
+  // Assigned in an effect (not during render) so a discarded concurrent
+  // render can't leave the ref pointing at a closure over thrown-away state.
+  useEffect(() => {
+    runCompanySaveRef.current = runCompanySave;
+  });
 
   useEffect(() => {
     if (!persistenceEnabled) {
@@ -743,11 +1027,89 @@ export function CreedProvider({
         payload.state!,
         canReplaceSections,
         resolvedProposalIdsRef.current,
+        new Set([
+          ...companySaveTimers.current.keys(),
+          ...companySaveInFlight.current,
+          ...companySaveDirty.current,
+          ...pendingCreatedSectionIdsRef.current,
+        ]),
+        Date.now() - lastCompanyMutationAtRef.current <
+          COMPANY_MUTATION_QUIET_MS,
       );
       latestStateRef.current = nextState;
       return nextState;
     });
   }, [persistenceEnabled]);
+
+  // Failed-save recovery. A failed company save (network throw or 5xx) is
+  // queued and re-run both when connectivity returns AND on a short backoff -
+  // fetch can throw while navigator.onLine stays true (DNS blip, server
+  // restart), in which case no "online" event ever fires.
+  function queueSectionRetry(sectionId: string) {
+    offlineRetrySectionsRef.current.add(sectionId);
+    toast.error(
+      typeof navigator !== "undefined" && !navigator.onLine
+        ? "You're offline - this section will save when you're back."
+        : "Could not save the section. Retrying shortly.",
+      { id: `creed-section-save-${sectionId}` },
+    );
+    if (offlineRetryTimerRef.current !== null) return;
+    offlineRetryTimerRef.current = window.setTimeout(() => {
+      offlineRetryTimerRef.current = null;
+      drainSectionRetries();
+    }, 15_000);
+  }
+  function drainSectionRetries() {
+    const retries = Array.from(offlineRetrySectionsRef.current);
+    offlineRetrySectionsRef.current.clear();
+    for (const sectionId of retries) {
+      void runCompanySaveRef.current?.(sectionId);
+    }
+  }
+  const drainSectionRetriesRef = useRef(drainSectionRetries);
+  drainSectionRetriesRef.current = drainSectionRetries;
+
+  useEffect(() => {
+    function onOnline() {
+      drainSectionRetriesRef.current();
+      if (
+        persistenceEnabled &&
+        latestStateRef.current.mutationTick !== lastPersistedTickRef.current
+      ) {
+        void flushPendingState(latestStateRef.current);
+      }
+    }
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [persistenceEnabled, flushPendingState]);
+
+  // Listen for other tabs' save announcements (see broadcastStateChanged).
+  // The resync is trailing-debounced: a typing burst in the other tab
+  // announces every autosave (~2/s), and answering each with a full-state GET
+  // would double backend reads for a two-tab user. One fetch after the burst
+  // settles delivers the same freshness.
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const channel = new BroadcastChannel("creed-state-sync");
+    syncChannelRef.current = channel;
+    let debounce: number | null = null;
+    channel.onmessage = (event: MessageEvent) => {
+      const data = event.data as { creedId?: string } | null;
+      if (!data?.creedId || data.creedId !== latestStateRef.current.creedId) {
+        return;
+      }
+      if (debounce !== null) window.clearTimeout(debounce);
+      debounce = window.setTimeout(() => {
+        debounce = null;
+        void syncFromServer();
+      }, 1_000);
+    };
+    return () => {
+      syncChannelRef.current = null;
+      if (debounce !== null) window.clearTimeout(debounce);
+      channel.close();
+    };
+  }, [syncFromServer]);
 
   // Switch the active Creed instantly, client-side. We deliberately do NOT use
   // router.refresh() here: that re-runs the whole app-layout gate and every
@@ -774,8 +1136,20 @@ export function CreedProvider({
         window.clearTimeout(timer);
       }
       companySaveTimers.current.clear();
-      // Locally-resolved proposal ids belong to the Creed we're leaving.
+      // Every per-Creed bit of bookkeeping belongs to the Creed we're
+      // leaving: locally-resolved proposal ids, dirty/in-flight save markers,
+      // queued retries (draining them against the NEW creedId would fire
+      // bogus saves), optimistic creates, and the mutation-quiet stamp.
       resolvedProposalIdsRef.current.clear();
+      companySaveInFlight.current.clear();
+      companySaveDirty.current.clear();
+      offlineRetrySectionsRef.current.clear();
+      pendingCreatedSectionIdsRef.current.clear();
+      lastCompanyMutationAtRef.current = 0;
+      if (offlineRetryTimerRef.current !== null) {
+        window.clearTimeout(offlineRetryTimerRef.current);
+        offlineRetryTimerRef.current = null;
+      }
 
       const activate = await fetch("/api/app/creeds/activate", {
         method: "POST",
@@ -1031,6 +1405,7 @@ export function CreedProvider({
     );
     // Company mode persists per section (the full-state PUT is disabled).
     if (latestStateRef.current.creedType === "company") {
+      trackEditingPresence(sectionId);
       saveCompanySection(sectionId, content);
     }
   }
@@ -1160,6 +1535,7 @@ export function CreedProvider({
   }
 
   function renameSection(sectionId: string, name: string) {
+    const trimmed = name.trim();
     commitState((current) =>
       nextMutationTick({
         ...current,
@@ -1167,7 +1543,7 @@ export function CreedProvider({
           section.id === sectionId
             ? {
                 ...section,
-                name: name.trim() || section.name,
+                name: trimmed || section.name,
                 lastEditedBy: "You",
                 lastEditedType: "user",
                 lastEditedLabel: "just now",
@@ -1176,6 +1552,9 @@ export function CreedProvider({
         ),
       }),
     );
+    if (trimmed && latestStateRef.current.creedType === "company") {
+      void saveCompanySectionMeta(sectionId, { name: trimmed });
+    }
   }
 
   function setSectionAccent(sectionId: string, accent: AccentKey) {
@@ -1195,6 +1574,9 @@ export function CreedProvider({
         ),
       }),
     );
+    if (latestStateRef.current.creedType === "company") {
+      void saveCompanySectionMeta(sectionId, { accent });
+    }
   }
 
   function duplicateSection(sectionId: string) {
@@ -2085,6 +2467,7 @@ export function CreedProvider({
       setDisplayName,
       setProfileAvatar,
       refreshState: syncFromServer,
+      sectionPresence,
       switchCreed,
       importSections,
       deleteAccount,
@@ -2134,6 +2517,7 @@ export function CreedProvider({
       exportMarkdown,
       exportActivityJson,
       exportAllDataJson,
+      sectionPresence,
     ],
   );
 
