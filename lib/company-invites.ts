@@ -365,22 +365,4 @@ export async function declineInvite(token: string, user: User): Promise<{ ok: bo
   return error ? { ok: false, error: "Could not decline the invite." } : { ok: true };
 }
 
-/** Pending invites the signed-in user has, by email. Powers the shell banner. */
-export async function pendingInvitesForEmail(email: string): Promise<Array<{ id: string; creedId: string; companyName: string }>> {
-  const db = admin();
-  const normalized = email.trim().toLowerCase();
-  const { data } = (await db
-    .from("creed_invites")
-    .select("id, creed_id")
-    .eq("email", normalized)
-    .eq("status", "pending")) as { data: Array<{ id: string; creed_id: string }> | null };
-  if (!data || data.length === 0) return [];
-  const ids = data.map((r) => r.creed_id);
-  const { data: creeds } = (await db.from("creeds").select("id, name").in("id", ids)) as {
-    data: Array<{ id: string; name: string }> | null;
-  };
-  const nameById = new Map((creeds ?? []).map((c) => [c.id, c.name]));
-  return data.map((r) => ({ id: r.id, creedId: r.creed_id, companyName: nameById.get(r.creed_id) ?? "a company" }));
-}
-
 export type { InviteRow };

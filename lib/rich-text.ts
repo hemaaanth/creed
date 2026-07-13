@@ -1,4 +1,3 @@
-import type { CreedSection } from "./creed-data.ts";
 
 export function escapeHtml(value: string) {
   return value
@@ -278,14 +277,4 @@ export function normalizeRichTextInput(input: { contentHtml?: string; contentMar
   }
 
   return "";
-}
-
-export function getEditableSectionInventory(
-  sections: CreedSection[]
-): Array<{ id: string; name: string; kind: CreedSection["kind"] }> {
-  return sections.map((section) => ({
-    id: section.id,
-    name: section.name,
-    kind: section.kind,
-  }));
 }

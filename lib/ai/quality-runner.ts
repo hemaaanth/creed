@@ -124,18 +124,8 @@ export function setBaselineReport(next: CreedQualityReport | null) {
   emit();
 }
 
-export function clearQualityRunnerError() {
-  if (error === null) return;
-  error = null;
-  emit();
-}
-
 export function getInFlightFull(fingerprint: string) {
   return inFlightFull.get(fingerprint) ?? null;
-}
-
-export function getInFlightSection(sectionFingerprint: string) {
-  return inFlightSection.get(sectionFingerprint) ?? null;
 }
 
 type FullRunArgs = {

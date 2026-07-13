@@ -77,10 +77,6 @@ export function getAgentRunnerServerSnapshot(): AgentRunSnapshot {
   return SERVER_SNAPSHOT;
 }
 
-export function isAgentRunning() {
-  return status === "working" || status === "applying";
-}
-
 // Reset to idle once the user has reviewed / dismissed a finished run. A no-op
 // while a run is in flight so it can't wipe live progress.
 export function clearAgentRun() {

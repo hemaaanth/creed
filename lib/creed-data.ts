@@ -58,8 +58,6 @@ export function isAccentKey(value: unknown): value is AccentKey {
   );
 }
 
-export const CREED_SEED_VERSION = "2026-04-18-agent-behavior-v1";
-
 export type ActorType = "user" | "agent";
 
 export type SectionTemplate =
@@ -148,25 +146,8 @@ export const LEGACY_CONVENTIONS_SECTION_ID = "conventions";
 // Retained for back-compat with any callers that still reference the
 // historical "governed sections" concept. Under the unified model, agent
 // write-access is per-section via section.agentWritable rather than a fixed
-// id list. The list below is the default set of agent-writable section IDs
-// that ship with a fresh Creed.
+// id list.
 export type GovernedSectionId = string;
-export const defaultAgentWritableSectionIds = [
-  IDENTITY_SECTION_ID,
-  BELIEFS_SECTION_ID,
-  GOALS_SECTION_ID,
-  WORK_SECTION_ID,
-  PREFERENCES_SECTION_ID,
-  CONSTRAINTS_SECTION_ID,
-  PEOPLE_SECTION_ID,
-  HEALTH_SECTION_ID,
-  ROUTINES_SECTION_ID,
-  CONTEXT_SECTION_ID,
-  // Keep the legacy IDs in the list so historical Creeds stay agent-writable
-  // for the same sections after the pivot lands.
-  OPERATING_PRINCIPLES_SECTION_ID,
-  CURRENT_FOCUS_SECTION_ID,
-] as const;
 
 export type HiddenInstructionSectionRule = {
   title: string;
@@ -333,14 +314,6 @@ export type ProposalDraft =
   | RenameSectionProposalDraft
   | RecolorSectionProposalDraft
   | ReorderSectionProposalDraft;
-
-// Type aliases retained so legacy import sites keep compiling during the
-// transition. Each is structurally identical to RichTextProposalDraft.
-export type OperatingPrinciplesProposalDraft = RichTextProposalDraft;
-export type DecisionProposalDraft = RichTextProposalDraft;
-export type CurrentFocusProposalDraft = RichTextProposalDraft;
-export type RulesProposalDraft = RichTextProposalDraft;
-export type ChipsProposalDraft = RichTextProposalDraft;
 
 export type Proposal = {
   id: string;
@@ -530,28 +503,6 @@ export function normalizeLegacyProposalDraft(
   return {
     kind: "rich-text",
     contentMarkdown: stringField("content") ?? "",
-  };
-}
-
-export function normalizeLegacySection(section: CreedSection): CreedSection {
-  if (
-    section.id !== LEGACY_CONVENTIONS_SECTION_ID &&
-    (section.accent as string) !== LEGACY_CONVENTIONS_SECTION_ID
-  ) {
-    return section;
-  }
-
-  return {
-    ...section,
-    id:
-      section.id === LEGACY_CONVENTIONS_SECTION_ID
-        ? OPERATING_PRINCIPLES_SECTION_ID
-        : section.id,
-    name:
-      section.id === LEGACY_CONVENTIONS_SECTION_ID
-        ? "Operating Principles"
-        : section.name,
-    accent: normalizeLegacyAccent(section.accent),
   };
 }
 
@@ -995,24 +946,6 @@ export const accentLabelMap: Record<AccentKey, string> = {
   // Legacy storage value - surface it under the new name so users see the
   // same label regardless of when their section was created.
   custom: "Mono",
-};
-
-export const proposalChangeTypeLabelMap: Record<ProposalChangeType, string> = {
-  "new-memory": "Memory",
-  "refines-existing": "Refines",
-  "conflicts-existing": "Conflict",
-};
-
-export const proposalImpactLabelMap: Record<ProposalImpact, string> = {
-  "future-responses": "Future responses",
-  "code-generation": "Code generation",
-  "project-context": "Project context",
-};
-
-export const proposalConfidenceLabelMap: Record<ProposalConfidence, string> = {
-  tentative: "Tentative",
-  repeated: "Repeated",
-  durable: "Durable",
 };
 
 export const collaborationRules: HiddenInstructionContract = {

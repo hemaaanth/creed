@@ -26,7 +26,6 @@ export type CreedRole = "owner" | "admin" | "member";
 //   read-only    -> visible, not editable
 //   propose      -> may suggest edits (owner/admin approve)  [UI: "Proposal-only"]
 //   direct       -> may edit directly                        [UI: "Direct edit"]
-export type MemberSectionPermission = AgentPermission;
 
 // The mode a user picks for one of their MCP agents on one Creed. Spelled
 // "proposal-only" (user-facing) vs the section permission's "propose"; mapped
@@ -50,20 +49,6 @@ const MODE_TO_PERMISSION: Record<McpAgentMode, AgentPermission> = {
   "read-only": "read-only",
   "proposal-only": "propose",
   direct: "direct",
-};
-
-// UI labels. The stored value is the key; the label is what a person reads.
-export const MEMBER_PERMISSION_LABELS: Record<AgentPermission, string> = {
-  hidden: "Hidden",
-  "read-only": "Read-only",
-  propose: "Proposal-only",
-  direct: "Direct edit",
-};
-
-export const MCP_AGENT_MODE_LABELS: Record<McpAgentMode, string> = {
-  "read-only": "Read-only",
-  "proposal-only": "Proposal-only",
-  direct: "Direct edit where allowed",
 };
 
 /**

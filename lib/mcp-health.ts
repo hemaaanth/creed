@@ -16,8 +16,6 @@ export function isMcpHealthRange(value: string): value is McpHealthRange {
   return (MCP_HEALTH_RANGES as readonly string[]).includes(value);
 }
 
-export type McpHealthMetric = "reads" | "directs" | "proposals";
-
 export type McpHealthAgent = {
   clientId: string;
   name: string;

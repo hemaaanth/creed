@@ -3,7 +3,6 @@ import { cookies } from "next/headers";
 import {
   getSupabasePublishableKey,
   getSupabaseUrl,
-  isSupabaseConfigured,
 } from "@/lib/supabase/env";
 
 export async function createSupabaseServerClient() {
@@ -25,17 +24,4 @@ export async function createSupabaseServerClient() {
       },
     },
   });
-}
-
-export async function getAuthenticatedUser() {
-  if (!isSupabaseConfigured()) {
-    return null;
-  }
-
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return user;
 }
