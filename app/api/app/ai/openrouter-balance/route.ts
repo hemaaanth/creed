@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { NO_STORE_HEADERS } from "@/lib/http-headers";
 import type { User } from "@supabase/supabase-js";
 import { fetchOpenRouterBalance, readAiSettings } from "@/lib/ai/persistence";
 import { requireApiAuth } from "@/lib/api-auth";
@@ -13,7 +14,6 @@ import { decryptSecret } from "@/lib/secret-crypto";
 // billing), so only the owner sees it - non-owner members get { balance: null }.
 // The key itself is never exposed either way.
 
-const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" } as const;
 
 async function resolveByokKey(client: unknown, user: User): Promise<string | null> {
   const company = await resolveMemberCompanyCreed(client, user);

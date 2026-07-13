@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { NO_STORE_HEADERS } from "@/lib/http-headers";
 import { hasPersistedCreed } from "@/lib/creed-backend";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -11,7 +12,6 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" } as const;
 
 export async function GET() {
   if (!isSupabaseConfigured()) {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { NO_STORE_HEADERS } from "@/lib/http-headers";
 import { requireApiAuth } from "@/lib/api-auth";
 import { entitlementGrantsAccess } from "@/lib/stripe";
 import { getCreditsState, getCompanyCreditsState } from "@/lib/ai/credits";
@@ -12,7 +13,6 @@ import { deriveCompanyAccessState } from "@/lib/creed-permissions";
 // one-time / monthly credits it grants - regardless of which Creed is active.
 
 export const runtime = "nodejs";
-const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" } as const;
 
 type PlanCredits = {
   balanceUsd: number;

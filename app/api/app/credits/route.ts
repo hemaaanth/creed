@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { NO_STORE_HEADERS } from "@/lib/http-headers";
 import { getCreditsState, getCompanyCreditsState } from "@/lib/ai/credits";
 import { requireApiAuth } from "@/lib/api-auth";
 import { resolveMemberCompanyCreed, resolveMemberCompanyCreedById } from "@/lib/creed-context";
@@ -14,7 +15,6 @@ import { resolveMemberCompanyCreed, resolveMemberCompanyCreedById } from "@/lib/
 // balance rather than depending on the active-Creed cookie. No param -> fall back
 // to the active Creed (cookie), preserving the personal + single-context reads.
 
-const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" } as const;
 
 export async function GET(request: Request) {
   const auth = await requireApiAuth();

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { NO_STORE_HEADERS } from "@/lib/http-headers";
 import { entitlementGrantsAccess } from "@/lib/stripe";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -27,7 +28,6 @@ export const dynamic = "force-dynamic";
 // `Cache-Control: private, no-store` because the payload differs per user
 // and a stale value (an unpaid user seeing a previous paid user's `true`)
 // would unlock the app for someone who hasn't bought it.
-const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" } as const;
 
 type StatusPayload = {
   paid: boolean;

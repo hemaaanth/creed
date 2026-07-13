@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { NO_STORE_HEADERS } from "@/lib/http-headers";
 import { markEntitlementWelcomed, markCompanyWelcomed } from "@/lib/stripe";
 import { resolveOwnedCompanyCreedId } from "@/lib/creed-context";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -17,7 +18,6 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" } as const;
 
 export async function POST() {
   if (!isSupabaseConfigured()) {
