@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -170,6 +171,35 @@ function qualityFingerprint(value: unknown) {
     QUALITY_FINGERPRINT_IGNORED_KEYS.has(key) ? undefined : nestedValue,
   );
 }
+
+// Per-section fingerprints keyed by object identity. Unchanged sections keep
+// their references across commits and sync polls, so a keystroke re-stringifies
+// only the edited section instead of the whole file.
+const sectionFingerprintCache = new WeakMap<CreedSection, string>();
+function cachedSectionFingerprint(section: CreedSection) {
+  let fingerprint = sectionFingerprintCache.get(section);
+  if (fingerprint === undefined) {
+    fingerprint = qualityFingerprint(section);
+    sectionFingerprintCache.set(section, fingerprint);
+  }
+  return fingerprint;
+}
+
+// Returns the previous value while the new one is deep-equal, so derived
+// arrays/objects keep a stable identity across unrelated re-renders (they'd
+// otherwise bust the memoized section cards on every keystroke).
+function useJsonStable<T>(value: T): T {
+  const ref = useRef(value);
+  if (
+    ref.current !== value &&
+    JSON.stringify(ref.current) !== JSON.stringify(value)
+  ) {
+    ref.current = value;
+  }
+  return ref.current;
+}
+
+const EMPTY_PROPOSALS: Proposal[] = [];
 
 function getProposalStatusStyles(status: ActivityStatus) {
   if (status === "pending") {
@@ -816,14 +846,18 @@ export function FileScreen() {
     () => state.sections.filter((section) => !section.archived),
     [state.sections],
   );
-  const visibleSectionTagTargets = useMemo(
-    () =>
-      visibleSections.map((section) => ({
-        id: section.id,
-        name: section.name,
-        accent: section.accent,
-      })),
-    [visibleSections],
+  // json-stable: names/accents change rarely, so the identity survives
+  // keystrokes and the memoized section cards don't see a new prop.
+  const visibleSectionTagTargets = useJsonStable(
+    useMemo(
+      () =>
+        visibleSections.map((section) => ({
+          id: section.id,
+          name: section.name,
+          accent: section.accent,
+        })),
+      [visibleSections],
+    ),
   );
   const pendingProposals = useMemo(
     () => state.proposals.filter((proposal) => proposal.status === "pending"),
@@ -842,6 +876,19 @@ export function FileScreen() {
       ),
     [pendingProposals, state.sections],
   );
+  // json-stable: normalization rebuilds proposal objects every pass, but
+  // proposals change rarely - keeping the array identity stable keeps the
+  // per-section buckets (and the memoized cards holding them) stable too.
+  const stablePendingProposals = useJsonStable(normalizedPendingProposals);
+  const proposalsBySectionId = useMemo(() => {
+    const buckets = new Map<string, Proposal[]>();
+    for (const proposal of stablePendingProposals) {
+      const bucket = buckets.get(proposal.sectionId) ?? [];
+      bucket.push(proposal);
+      buckets.set(proposal.sectionId, bucket);
+    }
+    return buckets;
+  }, [stablePendingProposals]);
   const [activityOpen, setActivityOpen] = useState(false);
 
   // Plain A toggles the activity sidebar (guarded like the shell's other
@@ -959,10 +1006,11 @@ export function FileScreen() {
   const versionIcon = useAnimatedIconControls();
   const nexusIcon = useAnimatedIconControls();
   const activityIcon = useAnimatedIconControls();
-  // `exportMarkdown` is re-created by the provider whenever state changes,
-  // so depending on it alone is sufficient - listing `state.sections`
-  // separately would be redundant.
-  const localMarkdown = useMemo(() => exportMarkdown(), [exportMarkdown]);
+  // `exportMarkdown` is identity-stable now (the provider hands out proxy
+  // actions), so the content dependency must be explicit: rebuild only when
+  // the sections actually change, not on every render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const localMarkdown = useMemo(() => exportMarkdown(), [state.sections]);
   const sectionQualityById = useMemo(
     () =>
       new Map(
@@ -991,7 +1039,9 @@ export function FileScreen() {
     () =>
       new Map(
         state.sections.map(
-          (section) => [section.id, qualityFingerprint(section)] as const,
+          // WeakMap-cached: only sections whose object identity changed
+          // (i.e. the one being edited) get re-stringified.
+          (section) => [section.id, cachedSectionFingerprint(section)] as const,
         ),
       ),
     [state.sections],
@@ -1024,14 +1074,24 @@ export function FileScreen() {
       fingerprintSnapshot: string,
     ) => {
       if (!payload.report) return;
-      setBaselineReport(payload.report);
+      // The shared-report poll usually returns exactly what we already hold.
+      // Keep the previous object when the payload is value-identical so the
+      // 60s sync doesn't re-render the whole screen for nothing.
+      const keepIfEqual = <T,>(previous: T, next: T): T =>
+        previous !== next && JSON.stringify(previous) === JSON.stringify(next)
+          ? previous
+          : next;
+      // setBaselineReport bails on identity, so handing back the previous
+      // report object when the payload is value-identical makes it a no-op.
+      setBaselineReport(
+        keepIfEqual(getQualityRunnerSnapshot().report, payload.report),
+      );
       setAnalyzedFullFingerprint(
         payload.current
           ? fingerprintSnapshot
           : `stored:${payload.storedContentHash ?? payload.report.contentHash}`,
       );
-      setAnalyzedSectionFingerprints(
-        Object.fromEntries(
+      const nextSectionFingerprints = Object.fromEntries(
           sectionsSnapshot.flatMap((section) => {
             const currentSectionFingerprint = qualityFingerprint(section);
             const storedSectionHash = payload.storedSectionHashes?.[section.id];
@@ -1059,11 +1119,82 @@ export function FileScreen() {
             }
             return [];
           }),
-        ),
+      );
+      setAnalyzedSectionFingerprints((previous) =>
+        keepIfEqual(previous, nextSectionFingerprints),
       );
     },
     [],
   );
+  // True only while a section drag is in progress; gates the Reorder layout
+  // animation so framer doesn't measure every section on every height change
+  // (see the layout prop on Reorder.Item).
+  const [reorderActive, setReorderActive] = useState(false);
+  useEffect(() => {
+    if (!reorderActive) return;
+    // Safety net: a pointerdown on the drag handle that never becomes a drag
+    // doesn't fire onDragEnd, so the pointer release clears the flag.
+    const clear = () => setReorderActive(false);
+    window.addEventListener("pointerup", clear);
+    window.addEventListener("pointercancel", clear);
+    return () => {
+      window.removeEventListener("pointerup", clear);
+      window.removeEventListener("pointercancel", clear);
+    };
+  }, [reorderActive]);
+
+  // Stable dispatch table for the memoized section cards: identity never
+  // changes (safe to hold in a memoized card across skipped renders), while
+  // calls always run the freshest closures via the ref.
+  const sectionHandlersImpl = {
+    reopenConsumed: () => setReopenDraft(null),
+    submitProposal: (sectionId: string, content: string) =>
+      fileProposalEdit(sectionId, content),
+    toggleLock: (sectionId: string) => toggleSectionLock(sectionId),
+    refreshQuality: (section: CreedSection) =>
+      void refreshSectionQuality(section),
+    acceptProposal: (proposalId: string) => void acceptProposal(proposalId),
+    rejectProposal: (proposalId: string) => rejectProposal(proposalId),
+    withdrawProposal: (proposalId: string) => withdrawProposal(proposalId),
+    changeRichText: (sectionId: string, content: string) =>
+      updateRichTextSection(sectionId, content),
+    rename: (sectionId: string, name: string) =>
+      setRenameSectionState({ id: sectionId, name }),
+    history: (sectionId: string, name: string) =>
+      setHistorySectionState({ id: sectionId, name }),
+    copy: (section: CreedSection) =>
+      void navigator.clipboard.writeText(sectionToMarkdown(section).trim()),
+    setAccent: (sectionId: string, accent: AccentKey) =>
+      setSectionAccent(sectionId, accent),
+    // Defer so the section menu closes before the dialog opens, letting the
+    // dialog play its enter animation.
+    requestDelete: (sectionId: string, name: string) =>
+      void window.setTimeout(
+        () => setDeleteSectionState({ id: sectionId, name }),
+        0,
+      ),
+    archive: (sectionId: string, name: string) => {
+      archiveSection(sectionId);
+      toast.success(`Archived "${name}"`);
+    },
+    addSectionAfter: (sectionId: string) => openComposerAndReveal(sectionId),
+    dragActiveChange: (active: boolean) => setReorderActive(active),
+  };
+  const sectionHandlersRef = useRef(sectionHandlersImpl);
+  sectionHandlersRef.current = sectionHandlersImpl;
+  const sectionHandlers = useMemo<SectionCardHandlers>(() => {
+    const proxies = {} as Record<string, (...args: unknown[]) => unknown>;
+    for (const key of Object.keys(sectionHandlersRef.current)) {
+      proxies[key] = (...args: unknown[]) =>
+        (
+          sectionHandlersRef.current[
+            key as keyof typeof sectionHandlersRef.current
+          ] as (...a: unknown[]) => unknown
+        )(...args);
+    }
+    return proxies as unknown as SectionCardHandlers;
+  }, []);
+
   const githubConfigured =
     state.settings.integrations.github.status === "connected" &&
     Boolean(state.settings.versionControl.repoOwner) &&
@@ -1157,10 +1288,14 @@ export function FileScreen() {
       }
     }
 
-    void loadVersionStatus();
+    // Trailing debounce: localMarkdown changes on every autosaved keystroke,
+    // and each run hashes the whole file and hits the GitHub status API. One
+    // check after the typing burst settles gives the same answer.
+    const debounce = window.setTimeout(() => void loadVersionStatus(), 1_500);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(debounce);
     };
   }, [
     localMarkdown,
@@ -2668,7 +2803,7 @@ export function FileScreen() {
                       const canArchiveSection =
                         state.creedType !== "company" || isCompanyManager;
                       return (
-                        <SectionCard
+                        <SectionCardBound
                           key={section.id}
                           section={section}
                           editingBy={sectionPresence[section.id]}
@@ -2678,17 +2813,13 @@ export function FileScreen() {
                           canReview={canReview}
                           readOnlyMember={readOnlyMember}
                           canDrag={canReorderSections}
+                          dragActive={reorderActive}
                           reopenDraft={
                             reopenDraft?.sectionId === section.id
                               ? reopenDraft.content
                               : null
                           }
-                          onReopenConsumed={() => setReopenDraft(null)}
-                          onSubmitProposal={(content) =>
-                            fileProposalEdit(section.id, content)
-                          }
                           globalLocked={state.locked}
-                          onToggleLock={() => toggleSectionLock(section.id)}
                           quality={quality}
                           qualityLoading={qualitySectionLoading === section.id}
                           qualityDirty={
@@ -2701,72 +2832,16 @@ export function FileScreen() {
                               !analyzedFingerprint ||
                               analyzedFingerprint !== currentFingerprint)
                           }
-                          onRefreshQuality={() =>
-                            void refreshSectionQuality(section)
+                          proposals={
+                            proposalsBySectionId.get(section.id) ??
+                            EMPTY_PROPOSALS
                           }
-                          proposals={normalizedPendingProposals.filter(
-                            (item) => item.sectionId === section.id,
-                          )}
-                          onAcceptProposal={(id) => {
-                            void acceptProposal(id);
-                          }}
-                          onRejectProposal={(id) => {
-                            rejectProposal(id);
-                          }}
-                          onWithdrawProposal={(id) => {
-                            withdrawProposal(id);
-                          }}
-                          onChangeRichText={(content) => {
-                            updateRichTextSection(section.id, content);
-                          }}
-                          onRename={() =>
-                            setRenameSectionState({
-                              id: section.id,
-                              name: section.name,
-                            })
-                          }
-                          onHistory={
+                          canHistory={
                             state.creedType === "company" && isCompanyManager
-                              ? () =>
-                                  setHistorySectionState({
-                                    id: section.id,
-                                    name: section.name,
-                                  })
-                              : undefined
                           }
-                          onCopy={() => {
-                            void navigator.clipboard.writeText(
-                              sectionToMarkdown(section).trim(),
-                            );
-                          }}
-                          onSetAccent={(accent) =>
-                            setSectionAccent(section.id, accent)
-                          }
-                          onDelete={() =>
-                            // Defer so the section menu closes before the dialog
-                            // opens, letting the dialog play its enter animation.
-                            window.setTimeout(
-                              () =>
-                                setDeleteSectionState({
-                                  id: section.id,
-                                  name: section.name,
-                                }),
-                              0,
-                            )
-                          }
-                          onArchive={
-                            canArchiveSection
-                              ? () => {
-                                  archiveSection(section.id);
-                                  toast.success(`Archived "${section.name}"`);
-                                }
-                              : undefined
-                          }
-                          onAddSectionAfter={
-                            canCreateSections
-                              ? () => openComposerAndReveal(section.id)
-                              : undefined
-                          }
+                          canArchive={canArchiveSection}
+                          canAddAfter={canCreateSections}
+                          handlers={sectionHandlers}
                         />
                       );
                     })}
@@ -3217,6 +3292,127 @@ export function FileScreen() {
   );
 }
 
+// The stable dispatch table SectionCardBound routes through (see FileScreen).
+type SectionCardHandlers = {
+  reopenConsumed: () => void;
+  submitProposal: (
+    sectionId: string,
+    content: string,
+  ) => Promise<boolean> | boolean | void;
+  toggleLock: (sectionId: string) => void;
+  refreshQuality: (section: CreedSection) => void;
+  acceptProposal: (proposalId: string) => void;
+  rejectProposal: (proposalId: string) => void;
+  withdrawProposal: (proposalId: string) => void;
+  changeRichText: (sectionId: string, content: string) => void;
+  rename: (sectionId: string, name: string) => void;
+  history: (sectionId: string, name: string) => void;
+  copy: (section: CreedSection) => void;
+  setAccent: (sectionId: string, accent: AccentKey) => void;
+  requestDelete: (sectionId: string, name: string) => void;
+  archive: (sectionId: string, name: string) => void;
+  addSectionAfter: (sectionId: string) => void;
+  dragActiveChange: (active: boolean) => void;
+};
+
+// Memo boundary for the section list. Every prop here is either a primitive,
+// identity-stable across unrelated commits (section objects, presence
+// arrays, proposal buckets, tag targets), or the stable `handlers` table -
+// so typing in one section no longer re-renders the other N-1 cards. The
+// closures below are recreated only when THIS card's data changes, and they
+// dispatch through `handlers`, which always runs the freshest implementation.
+const SectionCardBound = memo(function SectionCardBound({
+  section,
+  editingBy,
+  sectionTagTargets,
+  locked,
+  proposeMode,
+  canReview,
+  readOnlyMember,
+  canDrag,
+  dragActive,
+  reopenDraft,
+  globalLocked,
+  quality,
+  qualityLoading,
+  qualityDirty,
+  proposals,
+  canHistory,
+  canArchive,
+  canAddAfter,
+  handlers,
+}: {
+  section: CreedSection;
+  editingBy?: string[];
+  sectionTagTargets: Array<{ id: string; name: string; accent?: AccentKey }>;
+  locked: boolean;
+  proposeMode: boolean;
+  canReview: boolean;
+  readOnlyMember: boolean;
+  canDrag: boolean;
+  dragActive: boolean;
+  reopenDraft: string | null;
+  globalLocked: boolean;
+  quality?: CreedQualityReport["sections"][number];
+  qualityLoading: boolean;
+  qualityDirty: boolean;
+  proposals: Proposal[];
+  canHistory: boolean;
+  canArchive: boolean;
+  canAddAfter: boolean;
+  handlers: SectionCardHandlers;
+}) {
+  return (
+    <SectionCard
+      section={section}
+      editingBy={editingBy}
+      sectionTagTargets={sectionTagTargets}
+      locked={locked}
+      proposeMode={proposeMode}
+      canReview={canReview}
+      readOnlyMember={readOnlyMember}
+      canDrag={canDrag}
+      dragActive={dragActive}
+      onDragActiveChange={handlers.dragActiveChange}
+      reopenDraft={reopenDraft}
+      onReopenConsumed={handlers.reopenConsumed}
+      onSubmitProposal={(content) =>
+        handlers.submitProposal(section.id, content)
+      }
+      globalLocked={globalLocked}
+      onToggleLock={() => handlers.toggleLock(section.id)}
+      quality={quality}
+      qualityLoading={qualityLoading}
+      qualityDirty={qualityDirty}
+      onRefreshQuality={() => handlers.refreshQuality(section)}
+      proposals={proposals}
+      onAcceptProposal={handlers.acceptProposal}
+      onRejectProposal={handlers.rejectProposal}
+      onWithdrawProposal={handlers.withdrawProposal}
+      onChangeRichText={(content) =>
+        handlers.changeRichText(section.id, content)
+      }
+      onRename={() => handlers.rename(section.id, section.name)}
+      onHistory={
+        canHistory
+          ? () => handlers.history(section.id, section.name)
+          : undefined
+      }
+      onCopy={() => handlers.copy(section)}
+      onSetAccent={(accent) => handlers.setAccent(section.id, accent)}
+      onDelete={() => handlers.requestDelete(section.id, section.name)}
+      onArchive={
+        canArchive
+          ? () => handlers.archive(section.id, section.name)
+          : undefined
+      }
+      onAddSectionAfter={
+        canAddAfter ? () => handlers.addSectionAfter(section.id) : undefined
+      }
+    />
+  );
+});
+
 function SectionCard({
   section,
   editingBy,
@@ -3226,6 +3422,8 @@ function SectionCard({
   canReview = true,
   readOnlyMember = false,
   canDrag = true,
+  dragActive = false,
+  onDragActiveChange,
   reopenDraft = null,
   onReopenConsumed,
   onSubmitProposal,
@@ -3264,6 +3462,12 @@ function SectionCard({
   // Whether this viewer may reorder sections (owner/admin, or personal). When
   // false the drag handle is hidden and there's no icon left of the name.
   canDrag?: boolean;
+  // True only while a drag is in progress. Gates the Reorder layout
+  // animation: with layout always on, framer re-measures every section in
+  // the group whenever any of them changes height (i.e. on every keystroke),
+  // which is the dominant jank with many sections.
+  dragActive?: boolean;
+  onDragActiveChange?: (active: boolean) => void;
   // When the ReviewPill's "Edit" fires for a proposal on this section, its draft
   // content arrives here to be loaded back into the local editor draft.
   reopenDraft?: string | null;
@@ -3339,6 +3543,13 @@ function SectionCard({
       value={section.id}
       dragListener={false}
       dragControls={dragControls}
+      // Reorder.Item defaults layout to true (and types it `true |
+      // "position"`), but an explicit false is honoured at runtime and is
+      // the only way to switch the projection measurement off. Without
+      // this, framer measures every section in the group whenever any of
+      // them changes height - i.e. on every keystroke.
+      layout={(dragActive || false) as true}
+      onDragEnd={() => onDragActiveChange?.(false)}
       data-section-id={section.id}
       id={section.id}
       className="scroll-mt-24"
@@ -3350,7 +3561,10 @@ function SectionCard({
         {canDrag ? (
           <button
             type="button"
-            onPointerDown={(event) => dragControls.start(event)}
+            onPointerDown={(event) => {
+              onDragActiveChange?.(true);
+              dragControls.start(event);
+            }}
             className="group/drag absolute -left-7 top-1 hidden rounded-full p-1 text-[var(--creed-text-secondary)] transition-colors duration-150 hover:text-[var(--creed-text-primary)] xl:flex"
           >
             <GripVerticalIcon className="h-4 w-4" size={16} />

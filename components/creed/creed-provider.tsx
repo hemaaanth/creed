@@ -296,6 +296,88 @@ function mergeExternalState(
   };
 }
 
+// Deep-equal via JSON. State pieces are plain JSON-safe data (they round-trip
+// through the state API), and this only runs on sync polls, never keystrokes.
+function jsonEqual(a: unknown, b: unknown) {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+// Reuse `current`'s references for any piece of the merged state that didn't
+// actually change, so memoized consumers (section cards, rails) can bail. If
+// nothing changed at all, returns `current` itself and the setState is a
+// no-op render-wise.
+function stabilizeMergedState(
+  current: CreedState,
+  merged: CreedState,
+): CreedState {
+  if (merged === current) return current;
+
+  const currentSectionById = new Map(
+    current.sections.map((section) => [section.id, section]),
+  );
+  let allSectionsReused = merged.sections.length === current.sections.length;
+  const sections = merged.sections.map((section, index) => {
+    const existing = currentSectionById.get(section.id);
+    if (existing && jsonEqual(existing, section)) {
+      if (current.sections[index] !== existing) allSectionsReused = false;
+      return existing;
+    }
+    allSectionsReused = false;
+    return section;
+  });
+
+  const stabilized: CreedState = {
+    ...merged,
+    sections: allSectionsReused ? current.sections : sections,
+    proposals: jsonEqual(merged.proposals, current.proposals)
+      ? current.proposals
+      : merged.proposals,
+    activity: jsonEqual(merged.activity, current.activity)
+      ? current.activity
+      : merged.activity,
+    creeds: jsonEqual(merged.creeds, current.creeds)
+      ? current.creeds
+      : merged.creeds,
+    company: jsonEqual(merged.company, current.company)
+      ? current.company
+      : merged.company,
+    settings: jsonEqual(merged.settings, current.settings)
+      ? current.settings
+      : merged.settings,
+    connections: jsonEqual(merged.connections, current.connections)
+      ? current.connections
+      : merged.connections,
+    mcpClients: jsonEqual(merged.mcpClients, current.mcpClients)
+      ? current.mcpClients
+      : merged.mcpClients,
+    user: jsonEqual(merged.user, current.user) ? current.user : merged.user,
+    sectionRevisions: jsonEqual(merged.sectionRevisions, current.sectionRevisions)
+      ? current.sectionRevisions
+      : merged.sectionRevisions,
+    gettingStarted: jsonEqual(merged.gettingStarted, current.gettingStarted)
+      ? current.gettingStarted
+      : merged.gettingStarted,
+  };
+
+  // Everything reused and every remaining scalar equal: hand back the exact
+  // current object so React skips the re-render entirely.
+  const scalarsEqual = (Object.keys(stabilized) as Array<keyof CreedState>).every(
+    (key) => {
+      const next = stabilized[key];
+      const prev = current[key];
+      return typeof next === "object" && next !== null
+        ? next === prev
+        : next === prev || jsonEqual(next, prev);
+    },
+  );
+  return scalarsEqual ? current : stabilized;
+}
+
 function cloneSection(section: CreedSection): CreedSection {
   const copyId = `${section.id}-copy-${Math.random().toString(36).slice(2, 7)}`;
 
@@ -1100,7 +1182,7 @@ export function CreedProvider({
       }
       const canReplaceSections =
         current.mutationTick === lastPersistedTickRef.current;
-      const nextState = mergeExternalState(
+      const merged = mergeExternalState(
         current,
         payload.state!,
         canReplaceSections,
@@ -1114,6 +1196,13 @@ export function CreedProvider({
         Date.now() - lastCompanyMutationAtRef.current <
           COMPANY_MUTATION_QUIET_MS,
       );
+      // Polls usually return exactly what we already have. Re-committing the
+      // freshly JSON-parsed copy would give every section (and the state
+      // itself) a new identity every few seconds, busting the memoized
+      // section cards and re-rendering the whole screen for nothing - so
+      // unchanged pieces keep their current references, and a fully
+      // unchanged payload is a no-op.
+      const nextState = stabilizeMergedState(current, merged);
       latestStateRef.current = nextState;
       return nextState;
     });
@@ -2647,89 +2736,76 @@ export function CreedProvider({
     return JSON.stringify(state, null, 2);
   }
 
+  // The action functions above are plain declarations recreated every render.
+  // Handing them to the context directly made the memo below decorative (a new
+  // context identity per render, re-rendering every consumer per keystroke).
+  // Instead the freshest implementations live in a ref, and consumers get
+  // stable proxies that dispatch to it - so the context value only changes
+  // when `state` or `sectionPresence` actually change, and a memoized
+  // consumer holding "old" callbacks still always runs the newest closure.
+  const actionsImpl = {
+    toggleLock,
+    toggleSectionLock,
+    updateRichTextSection,
+    fileProposalEdit,
+    reorderSections,
+    addSection,
+    addSectionAfter,
+    renameSection,
+    setSectionAccent,
+    duplicateSection,
+    deleteSection,
+    archiveSection,
+    restoreSection,
+    archiveCreed,
+    clearSections,
+    acceptProposal,
+    acceptProposals,
+    rejectProposal,
+    withdrawProposal,
+    editProposalDraft,
+    setSectionPermission,
+    setAllSectionPermissions,
+    setVersionControlConfig,
+    setDisplayName,
+    setProfileAvatar,
+    refreshState: syncFromServer,
+    switchCreed,
+    importSections,
+    deleteAccount,
+    updateOnboarding,
+    resetOnboarding,
+    claimOnboardingPreview,
+    signOut,
+    exportMarkdown,
+    exportActivityJson,
+    exportAllDataJson,
+    markGettingStartedStep,
+  };
+  type CreedActions = typeof actionsImpl;
+  const actionsImplRef = useRef<CreedActions>(actionsImpl);
+  actionsImplRef.current = actionsImpl;
+  const stableActions = useMemo(() => {
+    const proxies = {} as Record<string, (...args: unknown[]) => unknown>;
+    for (const key of Object.keys(actionsImplRef.current)) {
+      proxies[key] = (...args: unknown[]) =>
+        (
+          actionsImplRef.current[key as keyof CreedActions] as (
+            ...a: unknown[]
+          ) => unknown
+        )(...args);
+    }
+    return proxies as unknown as CreedActions;
+    // The action set is static; only the implementations behind the ref move.
+  }, []);
+
   const contextValue = useMemo<CreedContextValue>(
     () => ({
       state,
-      toggleLock,
-      toggleSectionLock,
-      updateRichTextSection,
-      fileProposalEdit,
-      reorderSections,
-      addSection,
-      addSectionAfter,
-      renameSection,
-      setSectionAccent,
-      duplicateSection,
-      deleteSection,
-      archiveSection,
-      restoreSection,
-      archiveCreed,
-      clearSections,
-      acceptProposal,
-      acceptProposals,
-      rejectProposal,
-      withdrawProposal,
-      editProposalDraft,
-      setSectionPermission,
-      setAllSectionPermissions,
-      setVersionControlConfig,
-      setDisplayName,
-      setProfileAvatar,
-      refreshState: syncFromServer,
       sectionPresence,
-      switchCreed,
-      importSections,
-      deleteAccount,
-      updateOnboarding,
-      resetOnboarding,
-      claimOnboardingPreview,
-      signOut,
-      exportMarkdown,
-      exportActivityJson,
-      exportAllDataJson,
-      markGettingStartedStep,
+      ...stableActions,
     }),
-    [
-      state,
-      toggleLock,
-      toggleSectionLock,
-      updateRichTextSection,
-      fileProposalEdit,
-      reorderSections,
-      addSection,
-      addSectionAfter,
-      renameSection,
-      setSectionAccent,
-      duplicateSection,
-      deleteSection,
-      archiveSection,
-      restoreSection,
-      archiveCreed,
-      clearSections,
-      acceptProposal,
-      acceptProposals,
-      rejectProposal,
-      withdrawProposal,
-      editProposalDraft,
-      setSectionPermission,
-      setAllSectionPermissions,
-      setVersionControlConfig,
-      setDisplayName,
-      setProfileAvatar,
-      syncFromServer,
-      switchCreed,
-      importSections,
-      deleteAccount,
-      updateOnboarding,
-      resetOnboarding,
-      claimOnboardingPreview,
-      signOut,
-      exportMarkdown,
-      exportActivityJson,
-      exportAllDataJson,
-      markGettingStartedStep,
-      sectionPresence,
-    ],
+    [state, sectionPresence, stableActions],
   );
 
   return (
