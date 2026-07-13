@@ -16,14 +16,25 @@ type VersionPayload = {
   version?: string | null;
 };
 
-function isEditableTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-
-  return Boolean(
-    target.closest("input, textarea, select, [contenteditable='true']"),
-  );
+// Shared with the dev V-preview hotkey (welcome-dev-preview.tsx) so the
+// preview renders the exact production toast.
+export function showVersionUpdateToast() {
+  toast.info("New version available", {
+    id: UPDATE_TOAST_ID,
+    duration: Infinity,
+    closeButton: true,
+    action: {
+      label: "Refresh",
+      onClick: () => {
+        window.location.reload();
+      },
+    },
+    classNames: {
+      toast: "!pr-24",
+      actionButton:
+        "!absolute !top-1/2 !right-10 !left-auto !-translate-y-1/2 !transform-none !h-7 !rounded-[8px] !bg-transparent !border-0 !px-2 !text-[12px] !font-medium !text-current !opacity-70 hover:!opacity-100 hover:!bg-current/[0.10] !transition-all",
+    },
+  });
 }
 
 export function AppVersionNotifier({
@@ -31,28 +42,10 @@ export function AppVersionNotifier({
 }: AppVersionNotifierProps) {
   const shownVersionRef = useRef<string | null>(null);
 
-  const showVersionNotice = useCallback(
-    (version: string) => {
-      shownVersionRef.current = version;
-      toast.info("New version available", {
-        id: UPDATE_TOAST_ID,
-        duration: Infinity,
-        closeButton: true,
-        action: {
-          label: "Refresh",
-          onClick: () => {
-            window.location.reload();
-          },
-        },
-        classNames: {
-          toast: "!pr-24",
-          actionButton:
-            "!absolute !top-1/2 !right-10 !left-auto !-translate-y-1/2 !transform-none !h-7 !rounded-[8px] !bg-transparent !border-0 !px-2 !text-[12px] !font-medium !text-current !opacity-70 hover:!opacity-100 hover:!bg-current/[0.10] !transition-all",
-        },
-      });
-    },
-    [],
-  );
+  const showVersionNotice = useCallback((version: string) => {
+    shownVersionRef.current = version;
+    showVersionUpdateToast();
+  }, []);
 
   const checkForUpdate = useCallback(async () => {
     try {
@@ -115,30 +108,6 @@ export function AppVersionNotifier({
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [checkForUpdate]);
-
-  useEffect(() => {
-    if (process.env.NODE_ENV === "production") {
-      return;
-    }
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (
-        event.key.toLowerCase() !== "r" ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.repeat ||
-        isEditableTarget(event.target)
-      ) {
-        return;
-      }
-
-      showVersionNotice("dev-preview");
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [showVersionNotice]);
 
   return null;
 }

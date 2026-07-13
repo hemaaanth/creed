@@ -10,11 +10,13 @@ import {
 import { cn } from "@/lib/utils";
 
 // Post-onboarding "Get started" checklist. Lives in the bottom-right corner
-// where toasts spawn, shaped like a toast: same width, radius, and shadow,
-// but surfaced as the app background with a plain border. The chevron
-// expands the five steps; each checks itself off the first time the user
-// does the thing (see markGettingStartedStep call sites). Once all five are
-// done the card shows a brief all-set moment and never renders again.
+// where toasts spawn, shaped exactly like a toast: same width, radius,
+// shadow, and collapsed height, but surfaced as the app canvas colour
+// (--creed-surface) with a plain border. The chevron sits where a toast's
+// close button sits and expands the five steps; each checks itself off the
+// first time the user does the thing (see markGettingStartedStep call
+// sites). Once all five are done the card shows a brief all-set moment and
+// never renders again.
 //
 // The card publishes its rendered height as --getting-started-offset on the
 // root element; the shared <Toaster> offsets by it, so toasts always stack
@@ -55,6 +57,88 @@ function ProgressRing({ done, total }: { done: number; total: number }) {
   );
 }
 
+// Presentational card. The connected wrapper below feeds it real progress;
+// the dev O-preview feeds it local mock state.
+export function GettingStartedCardView({
+  steps,
+  expanded,
+  onToggleExpanded,
+  allDone = false,
+  onStepClick,
+}: {
+  steps: Partial<Record<GettingStartedStepKey, boolean>>;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  allDone?: boolean;
+  onStepClick?: (step: GettingStartedStepKey) => void;
+}) {
+  const doneCount = GETTING_STARTED_STEPS.filter(({ key }) => steps[key]).length;
+  const total = GETTING_STARTED_STEPS.length;
+
+  return (
+    <div className="overflow-hidden rounded-[14px] border border-[var(--creed-border)] bg-[var(--creed-surface)] shadow-[0_10px_30px_rgba(28,28,26,0.10)]">
+      {allDone ? (
+        <div className="flex items-center gap-3 p-3.5">
+          <ProgressRing done={total} total={total} />
+          <div className="text-[13px] font-medium leading-5 text-[var(--creed-text-primary)]">
+            You&apos;re all set.
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Same box as a title-only toast: p-3.5 around one 20px line,
+              with the chevron absolutely positioned like the toast's close
+              button so it adds no height. */}
+          <button
+            type="button"
+            onClick={onToggleExpanded}
+            aria-expanded={expanded}
+            className="relative flex w-full items-center gap-3 p-3.5 pr-20 text-left"
+          >
+            <ProgressRing done={doneCount} total={total} />
+            <span className="flex-1 truncate text-[13px] font-medium leading-5 text-[var(--creed-text-primary)]">
+              Get started
+            </span>
+            <span className="absolute right-10 top-1/2 -translate-y-1/2 text-[12px] tabular-nums text-[var(--creed-text-tertiary)]">
+              {doneCount}/{total}
+            </span>
+            <span className="absolute right-2.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[8px] text-[var(--creed-text-secondary)] transition-colors hover:bg-[var(--creed-surface-raised)]">
+              <ChevronDown
+                className={cn(
+                  "h-4 w-4 transition-transform duration-300",
+                  expanded && "rotate-180",
+                )}
+              />
+            </span>
+          </button>
+          <div
+            className={cn(
+              "grid transition-[grid-template-rows,opacity] duration-[280ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+              expanded
+                ? "grid-rows-[1fr] opacity-100"
+                : "grid-rows-[0fr] opacity-0",
+            )}
+          >
+            <div className="min-h-0 overflow-hidden">
+              <ul className="px-3.5 pb-3 pt-0.5">
+                {GETTING_STARTED_STEPS.map(({ key, label }) => (
+                  <StepRow
+                    key={key}
+                    stepKey={key}
+                    label={label}
+                    done={Boolean(steps[key])}
+                    onClick={onStepClick ? () => onStepClick(key) : undefined}
+                  />
+                ))}
+              </ul>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function GettingStartedCard() {
   const { state } = useCreed();
   const gettingStarted = state.gettingStarted;
@@ -67,8 +151,9 @@ export function GettingStartedCard() {
 
   const steps = gettingStarted?.steps ?? {};
   const doneCount = GETTING_STARTED_STEPS.filter(({ key }) => steps[key]).length;
-  const total = GETTING_STARTED_STEPS.length;
-  const allDone = doneCount === total || Boolean(gettingStarted?.completedAt);
+  const allDone =
+    doneCount === GETTING_STARTED_STEPS.length ||
+    Boolean(gettingStarted?.completedAt);
 
   // Expanded by default the very first time; collapse choice remembered.
   useEffect(() => {
@@ -143,57 +228,12 @@ export function GettingStartedCard() {
       ref={containerRef}
       className="fixed bottom-5 right-5 z-40 hidden w-[356px] sm:block"
     >
-      <div className="overflow-hidden rounded-[14px] border border-[var(--creed-border)] bg-[var(--creed-background)] shadow-[0_10px_30px_rgba(28,28,26,0.10)]">
-        {lingering && allDone ? (
-          <div className="flex items-center gap-3 p-3.5">
-            <ProgressRing done={total} total={total} />
-            <div className="text-[13px] font-medium leading-5 text-[var(--creed-text-primary)]">
-              You&apos;re all set.
-            </div>
-          </div>
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={toggleExpanded}
-              aria-expanded={expanded}
-              className="flex w-full items-center gap-3 p-3.5 text-left"
-            >
-              <ProgressRing done={doneCount} total={total} />
-              <span className="flex-1 text-[13px] font-medium leading-5 text-[var(--creed-text-primary)]">
-                Get started
-              </span>
-              <span className="text-[12px] tabular-nums text-[var(--creed-text-tertiary)]">
-                {doneCount}/{total}
-              </span>
-              <span className="flex h-7 w-7 items-center justify-center rounded-[8px] text-[var(--creed-text-secondary)] transition-colors hover:bg-[var(--creed-surface-raised)]">
-                <ChevronDown
-                  className={cn(
-                    "h-4 w-4 transition-transform duration-300",
-                    expanded && "rotate-180",
-                  )}
-                />
-              </span>
-            </button>
-            <div
-              className={cn(
-                "grid transition-[grid-template-rows,opacity] duration-[280ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-                expanded
-                  ? "grid-rows-[1fr] opacity-100"
-                  : "grid-rows-[0fr] opacity-0",
-              )}
-            >
-              <div className="min-h-0 overflow-hidden">
-                <ul className="px-3.5 pb-3 pt-0.5">
-                  {GETTING_STARTED_STEPS.map(({ key, label }) => (
-                    <StepRow key={key} stepKey={key} label={label} done={Boolean(steps[key])} />
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+      <GettingStartedCardView
+        steps={steps}
+        expanded={expanded}
+        onToggleExpanded={toggleExpanded}
+        allDone={lingering && allDone}
+      />
     </div>
   );
 }
@@ -202,13 +242,15 @@ function StepRow({
   stepKey,
   label,
   done,
+  onClick,
 }: {
   stepKey: GettingStartedStepKey;
   label: string;
   done: boolean;
+  onClick?: () => void;
 }) {
-  return (
-    <li data-step={stepKey} className="flex items-center gap-2.5 py-[7px]">
+  const content = (
+    <>
       <span
         className={cn(
           "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
@@ -235,6 +277,26 @@ function StepRow({
       >
         {label}
       </span>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <li data-step={stepKey}>
+        <button
+          type="button"
+          onClick={onClick}
+          className="flex w-full items-center gap-2.5 py-[7px] text-left"
+        >
+          {content}
+        </button>
+      </li>
+    );
+  }
+
+  return (
+    <li data-step={stepKey} className="flex items-center gap-2.5 py-[7px]">
+      {content}
     </li>
   );
 }
