@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
+import { log } from "@/lib/observability";
 
 export async function PATCH(request: Request) {
   const auth = await requireApiAuth();
   if (auth instanceof NextResponse) return auth;
 
-  const body = (await request.json()) as { name?: string };
+  let body: { name?: string };
+  try {
+    body = (await request.json()) as { name?: string };
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
   const name = body.name?.trim();
 
   if (!name || name.length > 200) {
@@ -25,7 +31,8 @@ export async function PATCH(request: Request) {
   });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    log.error("profile_update_failed", { userId: auth.user.id }, error);
+    return NextResponse.json({ error: "Could not update your profile." }, { status: 500 });
   }
 
   return NextResponse.json({

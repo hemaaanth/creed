@@ -377,10 +377,13 @@ export async function findOAuthAccessToken(
     return null;
   }
 
+  // Best-effort last-used stamp on every OAuth/MCP request. Swallow rejections
+  // so a transient DB blip can't become an unhandled promise rejection.
   void admin
     .from("oauth_tokens")
     .update({ last_used_at: new Date().toISOString() })
-    .eq("id", row.id);
+    .eq("id", row.id)
+    .then(undefined, () => {});
 
   const client = await getOAuthClient(row.client_id);
   return {

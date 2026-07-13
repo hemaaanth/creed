@@ -74,7 +74,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Could not resolve Creed for proposal." }, { status: 500 });
   }
 
-  const submittedBody = (await request.json()) as ProposalSubmission;
+  let submittedBody: ProposalSubmission;
+  try {
+    submittedBody = (await request.json()) as ProposalSubmission;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
   const normalizedDraft = submittedBody.draft
     ? normalizeLegacyProposalDraft(submittedBody.draft)
     : submittedBody.draft;

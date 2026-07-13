@@ -731,10 +731,14 @@ export async function revokeEntitlementForRefund(
     row = data;
   }
   if (!row && customerId) {
+    // stripe_customer_id is not unique, so order + limit instead of
+    // maybeSingle() (which throws on >1 match) - mirrors the company path.
     const { data } = (await admin
       .from("creed_entitlements")
       .select("*")
       .eq("stripe_customer_id", customerId)
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle()) as { data: EntitlementRow | null };
     row = data;
   }
@@ -824,10 +828,14 @@ export async function syncSubscriptionFromStripe(
     row = data;
   }
   if (!row && customerId) {
+    // stripe_customer_id is not unique (email reuse across users), so take the
+    // most recent row rather than maybeSingle(), which throws on >1 match.
     const { data } = (await admin
       .from("creed_entitlements")
       .select("*")
       .eq("stripe_customer_id", customerId)
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle()) as { data: EntitlementRow | null };
     row = data;
   }

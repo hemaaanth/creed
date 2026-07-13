@@ -178,14 +178,20 @@ export async function provisionCompanyFromSession(
     creedId = created.id;
   }
 
-  // Owner membership (idempotent via the (creed_id, user_id) PK).
-  await admin.from("creed_members").upsert(
+  // Owner membership (idempotent via the (creed_id, user_id) PK). This and the
+  // billing row below are load-bearing: they run after payment succeeded, so a
+  // silent failure would leave a paying customer with no company access and no
+  // way to recover. Throw so the webhook 500s and Stripe retries.
+  const { error: memberError } = await admin.from("creed_members").upsert(
     { creed_id: creedId, user_id: userId, role: "owner" },
     { onConflict: "creed_id,user_id" }
   );
+  if (memberError) {
+    throw new Error(memberError.message ?? "Could not create owner membership.");
+  }
 
   // Billing row (idempotent on the creed_id PK).
-  await admin.from("creed_company_billing").upsert(
+  const { error: billingError } = await admin.from("creed_company_billing").upsert(
     {
       creed_id: creedId,
       owner_user_id: userId,
@@ -205,6 +211,9 @@ export async function provisionCompanyFromSession(
     },
     { onConflict: "creed_id" }
   );
+  if (billingError) {
+    throw new Error(billingError.message ?? "Could not create company billing row.");
+  }
 
   // Initial usage grant on the shared creed_id-keyed wallet (grant_allowance,
   // same RPC personal uses). Subscription -> $50 this month; lifetime -> one-time

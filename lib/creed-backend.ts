@@ -2090,13 +2090,18 @@ export async function persistCreedState(
           (id === "conventions" && sectionIds.includes("operating-principles")),
       );
 
-    const { error } = await db
-      .from("creed_sections")
-      .delete()
-      .eq("creed_id", creedId)
-      .in("section_id", removableSectionIds);
-    if (error && !error.message.includes("in")) {
-      throw new Error(error.message);
+    // Only issue the delete when there's something to remove. The previous
+    // guard swallowed any error whose message merely contained "in" (which
+    // catches "timeout", "connection", "invalid input") to tolerate an empty
+    // `.in()` list; skipping the call when the list is empty is the real fix
+    // and lets every genuine delete error surface.
+    if (removableSectionIds.length > 0) {
+      const { error } = await db
+        .from("creed_sections")
+        .delete()
+        .eq("creed_id", creedId)
+        .in("section_id", removableSectionIds);
+      assertNoError(error, "Could not remove deleted sections.");
     }
   }
 

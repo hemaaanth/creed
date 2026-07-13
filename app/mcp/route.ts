@@ -91,6 +91,11 @@ const MCP_ACCENT_KEYS = [
   "projects",
   "output",
   "rose",
+  // Kept in sync with ACCENT_KEYS in lib/creed-data.ts. `satisfies` checks each
+  // entry is a valid accent but NOT that the list is complete, so yellow and
+  // mono were silently missing here and agents were rejected for setting them.
+  "yellow",
+  "mono",
   "custom",
 ] as const satisfies readonly AccentKey[];
 

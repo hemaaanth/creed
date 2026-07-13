@@ -330,7 +330,12 @@ export async function POST(request: Request) {
     activityLimit: 1,
   });
 
-  const body = (await request.json()) as DirectWriteBody;
+  let body: DirectWriteBody;
+  try {
+    body = (await request.json()) as DirectWriteBody;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
   let nextSections = result.state.sections;
   let activityEntry: ActivityEntry | null = null;

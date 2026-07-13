@@ -653,7 +653,7 @@ async function fileCompanyProposal(params: {
   });
   const defaults = PROPOSAL_DEFAULTS[params.draft.kind];
 
-  await db.from("creed_proposals").insert({
+  const { error: proposalInsertError } = await db.from("creed_proposals").insert({
     id: proposalId,
     creed_id: params.creedId,
     user_id: params.user.id,
@@ -674,6 +674,11 @@ async function fileCompanyProposal(params: {
     status: "pending",
     base_revision: baseRevision,
   });
+  // Fail loud: writeActivity below references this proposal, so a swallowed
+  // insert error would leave a dangling activity row and report success.
+  if (proposalInsertError) {
+    throw new Error(proposalInsertError.message);
+  }
   await writeActivity({
     creedId: params.creedId,
     proposalId,
