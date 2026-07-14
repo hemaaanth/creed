@@ -264,7 +264,7 @@ export function MarketingHeader({
           className={cn(
             "pointer-events-none absolute inset-x-0 top-0 rounded-xl",
             (stickyChromeActive || mobileMenuOpen) && !stickyDropdownSurface
-              ? "bg-[color:var(--creed-surface)]/95 opacity-100 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.22)]"
+              ? "bg-[color:var(--creed-surface)]/95 opacity-100 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.22)] backdrop-blur-sm"
               : "opacity-0",
           )}
         />
@@ -313,7 +313,7 @@ export function MarketingHeader({
                 );
               }
             }}
-            className="pointer-events-none absolute inset-x-0 top-0 bg-[color:var(--creed-surface)]/95 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.22)]"
+            className="pointer-events-none absolute inset-x-0 top-0 bg-[color:var(--creed-surface)]/95 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.22)] backdrop-blur-sm"
             style={{ height: stickyDropdownSurface.bottom }}
           />
         ) : null}
