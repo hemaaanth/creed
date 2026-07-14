@@ -43,6 +43,35 @@ export type ReviewPillProposal = {
   canReview?: boolean;
 };
 
+function ReviewAllActions({
+  onAcceptAll,
+  onRejectAll,
+}: {
+  onAcceptAll: () => void;
+  onRejectAll: () => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onRejectAll}
+        aria-label="Reject all"
+        className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm font-medium text-[var(--creed-text-secondary)] transition-colors hover:bg-[var(--creed-surface-raised)] hover:text-[var(--creed-text-primary)]"
+      >
+        Reject all
+      </button>
+      <button
+        type="button"
+        onClick={onAcceptAll}
+        aria-label="Accept all"
+        className="inline-flex h-7 items-center gap-1 rounded-md bg-[var(--creed-accent)] px-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--creed-accent-hover)]"
+      >
+        Accept all
+      </button>
+    </>
+  );
+}
+
 export function ReviewPill({
   proposals,
   onAcceptAll,
@@ -402,26 +431,7 @@ export function ReviewPill({
       {/* Reject/Accept all only when the viewer has proposals they can review
           (a member seeing only their own proposals can't bulk-approve). */}
       {hasReviewable ? (
-        <>
-          <button
-            type="button"
-            onClick={onRejectAll}
-            aria-label="Reject all"
-            className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm font-medium text-[var(--creed-text-secondary)] transition-colors hover:bg-[var(--creed-surface-raised)] hover:text-[var(--creed-text-primary)]"
-          >
-            <X className="h-3.5 w-3.5 sm:hidden" />
-            <span className="hidden sm:inline">Reject all</span>
-          </button>
-          <button
-            type="button"
-            onClick={onAcceptAll}
-            aria-label="Accept all"
-            className="inline-flex h-7 items-center gap-1 rounded-md bg-[var(--creed-accent)] px-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--creed-accent-hover)]"
-          >
-            <Check className="h-3.5 w-3.5 sm:hidden" />
-            <span className="hidden sm:inline">Accept all</span>
-          </button>
-        </>
+        <ReviewAllActions onAcceptAll={onAcceptAll} onRejectAll={onRejectAll} />
       ) : null}
     </div>
   );

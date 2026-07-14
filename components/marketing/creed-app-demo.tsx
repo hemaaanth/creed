@@ -37,7 +37,7 @@ import {
 } from "@/components/creed/file-quality-ui";
 import { useAnimatedIconControls } from "@/components/creed/animated-icon-controls";
 import { AnimatedMenuIconItem } from "@/components/creed/animated-icon-action";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -435,7 +435,11 @@ function NavRail({
         <div className="my-4 h-px bg-[var(--creed-border)] lg:my-6" />
         <div className="flex items-center justify-center gap-2.5 rounded-sm px-1 py-1 lg:justify-start lg:px-[7px]">
           <Avatar className="h-6 w-6 overflow-hidden rounded-[8px] bg-[var(--creed-accent)]">
-            <AvatarFallback className="bg-[var(--creed-accent)] text-xs font-medium text-white">S</AvatarFallback>
+            <AvatarImage
+              src="/assets/landing/steve-jobs-profile.png"
+              alt="Steve"
+              className="rounded-[8px] object-cover object-[50%_18%]"
+            />
           </Avatar>
           <span className="hidden min-w-0 flex-1 truncate text-sm font-medium text-[var(--creed-text-primary)] lg:inline">Steve</span>
         </div>
@@ -717,6 +721,7 @@ export function CreedAppDemo() {
         proposal: p,
         existingContent: diffBaseBySection[p.sectionId] ?? "",
         sectionName: p.sectionName,
+        canReview: true,
       })),
     [proposals, diffBaseBySection]
   );

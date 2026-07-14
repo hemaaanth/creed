@@ -7,8 +7,8 @@
 //    "all caught up" state. The diff scrolls when it overflows.
 //  - DirectEditDemo: the "require approval" toggle plus a direct-edit diff card;
 //    flipping the toggle swaps the edit between Direct and Pending.
-// The diff card is a demo-only variant of InlineProposalDiff (no agent name,
-// reads "[agent] proposed") so the shared app component stays untouched.
+// The diff card is a demo-only variant of InlineProposalDiff so the shared app
+// component stays untouched.
 // Client-only mock state, no backend.
 
 import { useEffect, useMemo, useState } from "react";
@@ -98,8 +98,8 @@ const SEED: Array<{ proposal: Proposal; base: string }> = [
   },
 ];
 
-// Demo-only proposal diff: same chrome as InlineProposalDiff, but the header
-// reads "[agent] proposed" with no agent name, and the diff scrolls when long.
+// Demo-only proposal diff: same chrome as InlineProposalDiff. Desktop shows
+// the proposal-state label; mobile retains only its dot separator.
 function DemoProposalDiff({
   proposal,
   existingContent,
@@ -126,7 +126,7 @@ function DemoProposalDiff({
             )}
           />
           <AgentIconStack agents={[proposal.agentName]} variant="inline" itemClassName="h-5 w-5" maxVisible={1} />
-          <span className="text-[var(--creed-text-tertiary)]">proposed</span>
+          <span className="hidden text-[var(--creed-text-tertiary)] sm:inline">proposed</span>
           <span className="text-[var(--creed-text-tertiary)]">&middot;</span>
           <span className="inline-flex items-center gap-1">
             <DiffBadge tone="added" count={stats.added} size="md" />

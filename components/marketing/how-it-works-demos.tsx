@@ -70,7 +70,7 @@ export function CreateDemo() {
 
   return (
     <div className="w-full">
-      <div className="rounded-lg border border-[var(--creed-border)] bg-[var(--creed-surface)] p-4 shadow-[0_8px_24px_rgba(28,28,26,0.04)]">
+      <div className="flex min-h-[232px] flex-col rounded-lg border border-[var(--creed-border)] bg-[var(--creed-surface)] p-4 shadow-[0_8px_24px_rgba(28,28,26,0.04)] lg:min-h-0">
         <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--creed-surface-raised)]">
           <motion.div
             className="h-full rounded-full"
@@ -116,7 +116,7 @@ export function CreateDemo() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.26, ease: EASE }}
-              className="flex flex-col items-center justify-center gap-3 py-7 text-center"
+              className="flex flex-1 flex-col items-center justify-center gap-3 text-center lg:flex-none lg:py-7"
             >
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#ECFDF5] text-[#16A34A] dark:bg-[#052e1a]/55 dark:text-[#4ade80]">
                 <Check className="h-4 w-4" />

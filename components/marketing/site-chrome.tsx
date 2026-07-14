@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -31,6 +33,53 @@ import {
 } from "@/lib/branding";
 
 type NavItem = { label: string; href: string };
+
+type StickyDropdownSurface = {
+  label: string;
+  left: number;
+  right: number;
+  bottom: number;
+  headerHeight: number;
+  containerWidth: number;
+  open: boolean;
+};
+
+function stickySurfacePath(
+  surface: StickyDropdownSurface,
+  expanded: boolean,
+  collapsedCap = false,
+  preserveJoin = false,
+) {
+  const outerRadius = 12;
+  const joinRadius = expanded || preserveJoin ? 20 : 0;
+  const joinHandle = joinRadius * 0.55228475;
+  const bottomRadius = expanded || collapsedCap ? 16 : 0;
+  const { containerWidth: width, headerHeight, left, right } = surface;
+  const bottom = expanded
+    ? surface.bottom
+    : headerHeight +
+      (collapsedCap ? bottomRadius + (preserveJoin ? joinRadius : 0) : 0);
+
+  return [
+    `M${outerRadius} 0`,
+    `H${width - outerRadius}`,
+    `Q${width} 0 ${width} ${outerRadius}`,
+    `V${headerHeight - outerRadius}`,
+    `Q${width} ${headerHeight} ${width - outerRadius} ${headerHeight}`,
+    `H${right + joinRadius}`,
+    `C${right + joinRadius - joinHandle} ${headerHeight} ${right} ${headerHeight + joinRadius - joinHandle} ${right} ${headerHeight + joinRadius}`,
+    `V${bottom - bottomRadius}`,
+    `Q${right} ${bottom} ${right - bottomRadius} ${bottom}`,
+    `H${left + bottomRadius}`,
+    `Q${left} ${bottom} ${left} ${bottom - bottomRadius}`,
+    `V${headerHeight + joinRadius}`,
+    `C${left} ${headerHeight + joinRadius - joinHandle} ${left - joinRadius + joinHandle} ${headerHeight} ${left - joinRadius} ${headerHeight}`,
+    `H${outerRadius}`,
+    `Q0 ${headerHeight} 0 ${headerHeight - outerRadius}`,
+    `V${outerRadius}`,
+    `Q0 0 ${outerRadius} 0Z`,
+  ].join(" ");
+}
 
 // Header nav groups. Mirror the footer's Product / Legal / Resources columns so
 // the two stay in lockstep; each renders as a dropdown in the desktop chrome.
@@ -124,6 +173,10 @@ export function MarketingHeader({
   void scrolled;
   const authState = useLandingAuthState(configured);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const chromeRef = useRef<HTMLDivElement | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
+  const [stickyDropdownSurface, setStickyDropdownSurface] =
+    useState<StickyDropdownSurface | null>(null);
   // Which mobile dropdown row is expanded (one at a time).
   const [openMobileGroup, setOpenMobileGroup] = useState<string | null>(null);
   // Sticky-header morph: once scrolled past the hero's top edge the header
@@ -153,30 +206,112 @@ export function MarketingHeader({
     return () => window.removeEventListener("scroll", closeOnScroll);
   }, [mobileMenuOpen]);
 
+  useEffect(() => {
+    if (!isScrolled) setStickyDropdownSurface(null);
+  }, [isScrolled]);
+
+  const updateStickyDropdownSurface = useCallback(
+    (label: string, menu: HTMLDivElement | null) => {
+      if (!menu || !chromeRef.current || !headerRef.current) {
+        setStickyDropdownSurface((current) =>
+          current?.label === label ? { ...current, open: false } : current,
+        );
+        return;
+      }
+
+      const containerRect = chromeRef.current.getBoundingClientRect();
+      const headerRect = headerRef.current.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+
+      setStickyDropdownSurface({
+        label,
+        left: menuRect.left - containerRect.left,
+        right: menuRect.right - containerRect.left,
+        bottom: menuRect.bottom - containerRect.top,
+        headerHeight: headerRect.bottom - containerRect.top,
+        containerWidth: containerRect.width,
+        open: true,
+      });
+    },
+    [],
+  );
+
   return (
     <div className="pointer-events-none fixed inset-x-0 top-0 z-50 px-3 pt-3 md:px-4 md:pt-4">
       <div
+        ref={chromeRef}
         className={cn(
           "pointer-events-auto relative mx-auto w-full transition-[max-width] duration-300 ease-out",
           isScrolled ? "max-w-[720px]" : "max-w-[880px]",
         )}
       >
-        {/* Translucent bar material on its OWN layer behind the content. It must
-            not wrap the nav, because a backdrop-filter is canceled inside a
-            backdrop-filter ancestor - keeping the blur a sibling (not a parent)
-            of the dropdown blurs lets both render. */}
-        <div
+        {/* The sticky surface stays behind the chrome. On mobile it extends
+            from that same rounded card to contain the open navigation menu. */}
+        <motion.div
           aria-hidden="true"
+          initial={false}
+          animate={{ height: mobileMenuOpen ? "18rem" : "100%" }}
+          transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
           className={cn(
-            "pointer-events-none absolute inset-0 rounded-xl transition-opacity duration-300 ease-out",
-            isScrolled
+            "pointer-events-none absolute inset-x-0 top-0 rounded-xl",
+            (isScrolled || mobileMenuOpen) && !stickyDropdownSurface
               ? "bg-[color:var(--creed-surface)]/95 opacity-100 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.22)] backdrop-blur-sm"
               : "opacity-0",
           )}
         />
+        {stickyDropdownSurface ? (
+          <motion.div
+            aria-hidden="true"
+            initial={{
+              clipPath: `path("${stickySurfacePath(
+                stickyDropdownSurface,
+                false,
+                true,
+              )}")`,
+            }}
+            animate={{
+              clipPath: stickyDropdownSurface.open
+                ? `path("${stickySurfacePath(stickyDropdownSurface, true)}")`
+                : [
+                    `path("${stickySurfacePath(stickyDropdownSurface, true)}")`,
+                    `path("${stickySurfacePath(
+                      stickyDropdownSurface,
+                      false,
+                      true,
+                      true,
+                    )}")`,
+                    `path("${stickySurfacePath(
+                      stickyDropdownSurface,
+                      false,
+                      true,
+                    )}")`,
+                    `path("${stickySurfacePath(stickyDropdownSurface, false)}")`,
+                  ],
+            }}
+            transition={{
+              clipPath: stickyDropdownSurface.open
+                ? { duration: 0.24, ease: [0.22, 1, 0.36, 1] }
+                : {
+                    duration: 0.28,
+                    times: [0, 0.82, 0.96, 1],
+                    ease: [0.22, 1, 0.36, 1],
+                  },
+            }}
+            onAnimationComplete={() => {
+              if (!stickyDropdownSurface.open) {
+                setStickyDropdownSurface((current) =>
+                  current && !current.open ? null : current,
+                );
+              }
+            }}
+            className="pointer-events-none absolute inset-x-0 top-0 bg-[color:var(--creed-surface)]/95 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.22)] backdrop-blur-sm"
+            style={{ height: stickyDropdownSurface.bottom }}
+          />
+        ) : null}
         <header
+          ref={headerRef}
           className={cn(
-            "relative flex w-full items-center justify-between transition-[padding] duration-300 ease-out",
+            "relative z-10 flex w-full items-center justify-between transition-[padding] duration-300 ease-out",
             isScrolled ? "py-1.5 pl-4 pr-1.5" : "px-1 py-1",
           )}
         >
@@ -210,6 +345,7 @@ export function MarketingHeader({
             items={group.items}
             align="left"
             scrolled={isScrolled}
+            onStickySurfaceChange={updateStickyDropdownSurface}
           />
         ))}
       </nav>
@@ -219,55 +355,30 @@ export function MarketingHeader({
         scrolled={isScrolled}
         mobileMenuOpen={mobileMenuOpen}
         setMobileMenuOpen={setMobileMenuOpen}
+        onStickySurfaceChange={updateStickyDropdownSurface}
       />
 
       <AnimatePresence initial={false}>
         {mobileMenuOpen ? (
-          <div className="fixed inset-0 z-[90] md:hidden">
-            {/* Invisible tap-to-close layer. The blur is local to the
-                dropdown card below, not full-screen. */}
+          <div className="contents md:hidden">
+            {/* Invisible outside-tap layer. The header and its extended surface
+                sit above it, so the brand and menu button remain visible. */}
             <motion.button
               type="button"
               aria-label="Close navigation menu"
               onClick={() => setMobileMenuOpen(false)}
-              className="absolute inset-0 bg-transparent"
+              className="fixed inset-0 z-0 bg-transparent"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
             />
-
-            {/* Subtle backdrop blur localized to the menu area. Sits
-                OUTSIDE the motion.div below because motion's filter
-                animation creates a stacking context that nukes
-                backdrop-filter on descendants. A large, soft radial mask fades
-                the blur to zero at the edges so there's no visible card
-                outline - the blur just melts into the surrounding hero. */}
-            <motion.div
-              aria-hidden="true"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-              className="pointer-events-none absolute -right-6 top-[3.1rem] h-[21rem] w-[15rem] bg-black/[0.035] backdrop-blur-[12px]"
-              style={{
-                WebkitBackdropFilter: "blur(12px)",
-                WebkitMaskImage:
-                  "radial-gradient(ellipse 76% 78% at 72% 46%, black 30%, rgba(0,0,0,0.72) 54%, transparent 100%)",
-                maskImage:
-                  "radial-gradient(ellipse 76% 78% at 72% 46%, black 30%, rgba(0,0,0,0.72) 54%, transparent 100%)",
-              }}
-            />
-
-            {/* No filter animation here: a lingering filter (even blur(0px))
-                forms a backdrop root that cancels the per-row backdrop-blur on
-                the expanded sub-items below. */}
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-              className="absolute right-4 top-[4.65rem] flex flex-col items-end gap-2 text-[var(--creed-text-primary)]"
+              className="absolute right-2 top-[4rem] z-10 flex flex-col items-end gap-2 text-[var(--creed-text-primary)]"
             >
               {navGroups.map((group, gIndex) => (
                 <motion.div
@@ -355,7 +466,10 @@ export function MarketingHeader({
                     ease: [0.22, 1, 0.36, 1],
                   }}
                 >
-                  <GitHubStarButton onNavigate={() => setMobileMenuOpen(false)} />
+                  <GitHubStarButton
+                    scrolled
+                    onNavigate={() => setMobileMenuOpen(false)}
+                  />
                 </motion.div>
               ) : null}
             </motion.div>
@@ -439,16 +553,39 @@ function HeaderDropdown({
   align = "left",
   scrolled,
   className,
+  onStickySurfaceChange,
 }: {
   label: string;
   items: NavItem[];
   align?: "left" | "right";
   scrolled?: boolean;
   className?: string;
+  onStickySurfaceChange?: (
+    label: string,
+    menu: HTMLDivElement | null,
+  ) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const alignRight = align === "right";
+
+  useLayoutEffect(() => {
+    if (!open || !scrolled || !menuRef.current || !onStickySurfaceChange) {
+      return;
+    }
+
+    const menu = menuRef.current;
+    const updateSurface = () => onStickySurfaceChange(label, menu);
+    updateSurface();
+
+    const resizeObserver = new ResizeObserver(updateSurface);
+    resizeObserver.observe(menu);
+    return () => {
+      resizeObserver.disconnect();
+      onStickySurfaceChange(label, null);
+    };
+  }, [label, onStickySurfaceChange, open, scrolled]);
 
   useEffect(() => {
     if (!open) return;
@@ -507,45 +644,61 @@ function HeaderDropdown({
       <AnimatePresence initial={false}>
         {open ? (
           <>
-            {/* Localized blur behind the menu (sibling of the menu, not a child:
-                motion's filter animation creates a stacking context that would
-                nuke a child's backdrop-filter). A feathered mask melts it in. */}
+            {!scrolled ? (
+              <motion.div
+                aria-hidden
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                className={cn(
+                  "pointer-events-none absolute top-[1.15rem] w-[13rem] bg-black/[0.03] backdrop-blur-[12px]",
+                  alignRight ? "-right-8" : "-left-8",
+                )}
+                style={{
+                  height: `${items.length * 2.75 + 2.5}rem`,
+                  WebkitBackdropFilter: "blur(12px)",
+                  WebkitMaskImage:
+                    "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.55) 13%, #000 28%, #000 72%, rgba(0,0,0,0.55) 87%, transparent 100%), linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.55) 14%, #000 28%, #000 72%, rgba(0,0,0,0.55) 86%, transparent 100%)",
+                  maskImage:
+                    "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.55) 13%, #000 28%, #000 72%, rgba(0,0,0,0.55) 87%, transparent 100%), linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.55) 14%, #000 28%, #000 72%, rgba(0,0,0,0.55) 86%, transparent 100%)",
+                  maskComposite: "intersect",
+                  WebkitMaskComposite: "source-in",
+                }}
+              />
+            ) : null}
             <motion.div
-              aria-hidden
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-              className={cn(
-                "pointer-events-none absolute top-[1.15rem] w-[13rem] bg-black/[0.03] backdrop-blur-[12px]",
-                alignRight ? "-right-8" : "-left-8",
-              )}
-              style={{
-                // Centred on the menu's bounding box (top-[2.6rem], w-[9rem], the
-                // h-9 rows with gap-2) with generous feather padding all round, so
-                // the soft mask edges fade out beyond the items, not across them.
-                height: `${items.length * 2.75 + 2.5}rem`,
-                WebkitBackdropFilter: "blur(12px)",
-                // Feathered rectangle (solid centre, soft edges on every side) with
-                // a wide, gradual fade so the blur melts into the hero instead of
-                // ending on a hard edge. Wider feather than the mobile menu since
-                // this is a tall vertical stack.
-                WebkitMaskImage:
-                  "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.55) 13%, #000 28%, #000 72%, rgba(0,0,0,0.55) 87%, transparent 100%), linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.55) 14%, #000 28%, #000 72%, rgba(0,0,0,0.55) 86%, transparent 100%)",
-                maskImage:
-                  "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.55) 13%, #000 28%, #000 72%, rgba(0,0,0,0.55) 87%, transparent 100%), linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.55) 14%, #000 28%, #000 72%, rgba(0,0,0,0.55) 86%, transparent 100%)",
-                maskComposite: "intersect",
-                WebkitMaskComposite: "source-in",
+              ref={menuRef}
+              initial={{
+                opacity: 0,
+                y: -8,
+                scaleY: scrolled ? 0.96 : 1,
+                filter: scrolled ? "none" : "blur(8px)",
               }}
-            />
-            <motion.div
-              initial={{ opacity: 0, y: -10, filter: "blur(8px)" }}
-              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-              exit={{ opacity: 0, y: -10, filter: "blur(8px)" }}
-              transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+              animate={{
+                opacity: 1,
+                y: 0,
+                scaleY: 1,
+                filter: scrolled ? "none" : "blur(0px)",
+              }}
+              exit={{
+                opacity: 0,
+                y: -8,
+                scaleY: scrolled ? 0.96 : 1,
+                filter: scrolled ? "none" : "blur(8px)",
+              }}
+              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+              style={{ transformOrigin: "top center" }}
               className={cn(
-                "absolute top-[2.6rem] z-10 flex w-[9rem] flex-col gap-2 text-white",
-                alignRight ? "right-0 items-end" : "left-0 items-start",
+                "absolute z-10 flex flex-col gap-2",
+                scrolled
+                  ? "top-[calc(100%+0.3125rem)] left-1/2 w-full -translate-x-1/2 pb-4 pt-2"
+                  : "top-[2.6rem] w-[9rem] text-white",
+                scrolled
+                  ? "items-start"
+                  : alignRight
+                    ? "right-0 items-end"
+                    : "left-0 items-start",
               )}
             >
               {items.map((item, index) => (
@@ -558,8 +711,7 @@ function HeaderDropdown({
                     opacity: 0,
                     x: alignRight ? 10 : -10,
                     transition: {
-                      duration: 0.2,
-                      delay: (items.length - 1 - index) * 0.04,
+                      duration: 0.16,
                       ease: [0.22, 1, 0.36, 1],
                     },
                   }}
@@ -591,11 +743,16 @@ function HeaderAuthActions({
   scrolled,
   mobileMenuOpen,
   setMobileMenuOpen,
+  onStickySurfaceChange,
 }: {
   authState: "loading" | "signed-in" | "signed-out";
   scrolled?: boolean;
   mobileMenuOpen: boolean;
   setMobileMenuOpen: Dispatch<SetStateAction<boolean>>;
+  onStickySurfaceChange: (
+    label: string,
+    menu: HTMLDivElement | null,
+  ) => void;
 }) {
   const enterArrow = useAnimatedIconControls(80, undefined, 420);
 
@@ -670,6 +827,7 @@ function HeaderAuthActions({
         align="right"
         scrolled={scrolled}
         className="hidden md:block"
+        onStickySurfaceChange={onStickySurfaceChange}
       />
       <GitHubStarButton scrolled={scrolled} className="hidden md:inline-flex" />
       {mobileLinksTrigger}
@@ -678,8 +836,8 @@ function HeaderAuthActions({
 }
 
 // One row of the mobile menu: a dropdown trigger whose chevron sits to the
-// right of the label and points left when closed, rotating to point right when
-// open as the sub-links slide in to the left of the label.
+// left of the right-aligned label, keeping every label's trailing edge aligned
+// with the GitHub star count below.
 function MobileNavRow({
   label,
   items,
@@ -694,10 +852,8 @@ function MobileNavRow({
   onNavigate: () => void;
 }) {
   return (
-    // Fixed height so expanding a group (its items panel is taller than the
-    // h-9 button because of the blur-feather padding) doesn't grow the row and
-    // jump the spacing between the dropdown buttons. The panel overflows this
-    // row visually but never changes its layout height.
+    // Fixed height keeps an expanded group from moving the other navigation
+    // rows. Its links overflow horizontally inside the shared header surface.
     <div className="flex h-9 items-center gap-2">
       <AnimatePresence initial={false}>
         {open ? (
@@ -710,10 +866,6 @@ function MobileNavRow({
             className="flex max-w-[min(68vw,24rem)] items-center gap-1 overflow-x-auto overflow-y-hidden overscroll-x-contain bg-black/[0.04] px-7 py-3 backdrop-blur-[12px] [scrollbar-width:none] [touch-action:pan-x] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
             style={{
               WebkitBackdropFilter: "blur(12px)",
-              // A flat, evenly-feathered panel rather than a radial "wheel":
-              // two linear fades intersected give a solid centre with a soft
-              // edge on every side, and the generous padding makes the blurred
-              // area extend well beyond the text.
               maskImage:
                 "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.55) 10%, #000 24%, #000 76%, rgba(0,0,0,0.55) 90%, transparent 100%), linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.55) 14%, #000 30%, #000 70%, rgba(0,0,0,0.55) 86%, transparent 100%)",
               WebkitMaskImage:
@@ -752,15 +904,15 @@ function MobileNavRow({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex h-9 shrink-0 items-center gap-1.5 px-3.5 text-[14px] font-medium transition-opacity duration-200 hover:opacity-55"
+        className="flex h-9 shrink-0 items-center justify-end gap-3 px-3.5 text-[14px] font-medium transition-opacity duration-200 hover:opacity-55"
       >
-        {label}
         <ChevronLeft
           className={cn(
             "h-3.5 w-3.5 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]",
             open && "rotate-180",
           )}
         />
+        {label}
       </button>
     </div>
   );

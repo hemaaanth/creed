@@ -15,7 +15,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ArrowUp, Check, ChevronDown, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown } from "lucide-react";
 import { AgentIconStack } from "@/components/creed/agent-icon-stack";
 import {
   DiffBadge,
@@ -306,9 +306,9 @@ const ROUTINES_APPLIED_HTML = bulletList([...ROUTINES_BASE, ROUTINES_ADD]);
 // Parks on 1 under reduced motion so the edit stays visible.
 const UPDATE_STEPS = [1400, 3000, 2600] as const;
 
-// Compact proposal card: the agent logo, "proposed", and the diff stats with
-// Reject / Accept on one line. The word-level diff drops down below when
-// `expanded`, with a smooth height animation.
+// Compact proposal card: the agent logo, desktop-only "proposed", and the diff
+// stats with Reject / Accept on one line. The word-level diff drops down below
+// when `expanded`, with a smooth height animation.
 function MiniProposalDiff({
   base,
   proposed,
@@ -344,30 +344,28 @@ function MiniProposalDiff({
           itemClassName="h-5 w-5"
           maxVisible={1}
         />
+        <span className="hidden text-[var(--creed-text-tertiary)] sm:inline">proposed</span>
+        <span className="text-[var(--creed-text-tertiary)]">&middot;</span>
         <span className="inline-flex items-center gap-1">
           <DiffBadge tone="added" count={stats.added} size="md" />
           <DiffBadge tone="removed" count={stats.removed} size="md" />
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          {/* Mobile is tight, so the labels collapse to icons (X / tick) below
-              the sm breakpoint and read as full buttons from sm up. */}
           <button
             type="button"
             onClick={onReject}
             aria-label="Reject"
-            className="inline-flex h-7 items-center justify-center gap-1 rounded-md px-1.5 text-sm font-medium text-[var(--creed-text-secondary)] transition-colors hover:bg-[var(--creed-surface-raised)] hover:text-[var(--creed-text-primary)] sm:px-2"
+            className="inline-flex h-7 items-center justify-center rounded-md px-2 text-sm font-medium text-[var(--creed-text-secondary)] transition-colors hover:bg-[var(--creed-surface-raised)] hover:text-[var(--creed-text-primary)]"
           >
-            <X className="h-3.5 w-3.5 sm:hidden" />
-            <span className="hidden sm:inline">Reject</span>
+            Reject
           </button>
           <button
             type="button"
             onClick={onAccept}
             aria-label="Accept"
-            className="inline-flex h-7 items-center justify-center gap-1 rounded-md bg-[var(--creed-accent)] px-1.5 text-sm font-medium text-white transition-colors hover:bg-[var(--creed-accent-hover)] sm:px-2.5"
+            className="inline-flex h-7 items-center justify-center rounded-md bg-[var(--creed-accent)] px-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--creed-accent-hover)]"
           >
-            <Check className="h-3.5 w-3.5 sm:hidden" />
-            <span className="hidden sm:inline">Accept</span>
+            Accept
           </button>
         </div>
       </div>
