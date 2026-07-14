@@ -1,4 +1,4 @@
-import type { ConnectionAction } from "@/lib/creed-data";
+import type { ConnectionAction, McpClient } from "@/lib/creed-data";
 
 // Per-agent connect buttons + hint, computed on the client from the MCP URL.
 //
@@ -13,6 +13,32 @@ export type ConnectionPresentation = {
   primary?: ConnectionAction;
   secondary?: ConnectionAction;
 };
+
+export function splitConnectionClients(clients: McpClient[]) {
+  return {
+    mcp: clients.filter((client) => client.icon !== "cli"),
+    cli: clients.filter((client) => client.icon === "cli"),
+  };
+}
+
+export function getCliConnectionPresentation(
+  connectionName: string,
+): ConnectionPresentation {
+  const command = "npx creed-cli call read_creed --json";
+  return {
+    hint: `Use Creed CLI with ${connectionName}. The first run opens the Creed OAuth screen, then the same command reads your live context whenever the agent needs it.`,
+    primary: {
+      kind: "copy",
+      label: "Copy prompt",
+      value: `Use the Creed CLI for my personal context. Before meaningful work, run \`${command}\`, complete the browser authorization if prompted, and use the returned Creed to shape your response.`,
+    },
+    secondary: {
+      kind: "copy",
+      label: "Copy command",
+      value: command,
+    },
+  };
+}
 
 export function getConnectionPresentation(
   connectionId: string,

@@ -21,6 +21,7 @@ import {
   AGENT_CATEGORY_FILTER_ITEMS,
   getAgentCategory,
 } from "@/lib/agent-icon";
+import { splitConnectionClients } from "@/lib/connection-actions";
 import type { AgentIconKind } from "@/lib/creed-data";
 import { cn } from "@/lib/utils";
 
@@ -39,11 +40,29 @@ const SETUP_STEPS = [
   },
 ];
 
+const CLI_SETUP_STEPS = [
+  {
+    title: "Copy the CLI command",
+    detail: "Run Creed directly with npx, with no global install required.",
+  },
+  {
+    title: "Launch it in your terminal",
+    detail: "The first run opens Creed's OAuth screen in your browser.",
+  },
+  {
+    title: "Choose your Creed and allow",
+    detail: "Return to the terminal after approval and every live tool is ready.",
+  },
+];
+
+type ConnectionMode = "mcp" | "cli";
+
 export function ConnectionsScreen() {
   const router = useRouter();
   const { state, refreshState } = useCreed();
   const [copied, setCopied] = useState<string | null>(null);
   const [setupOpen, setSetupOpen] = useState(false);
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>("mcp");
   const [agentTypeFilter, setAgentTypeFilter] = useState<string>("all");
 
   async function copyValue(key: string, value: string) {
@@ -58,9 +77,14 @@ export function ConnectionsScreen() {
     }
   }, [router, state.sections.length]);
 
-  const connected = state.mcpStatus === "connected";
+  const { mcp: mcpAgentClients, cli: cliClients } = useMemo(
+    () => splitConnectionClients(state.mcpClients),
+    [state.mcpClients],
+  );
+  const connected = mcpAgentClients.length > 0;
+  const cliConnected = cliClients.length > 0;
   const mcpStatusLabel = connected ? "Connected" : "Not connected via MCP";
-  const showMcpStack = connected && state.mcpClients.length > 0;
+  const showMcpStack = connected;
 
   const visibleConnections = useMemo(
     () =>
@@ -110,14 +134,29 @@ export function ConnectionsScreen() {
             Setup
           </h2>
           <p className="mt-2 text-[14px] leading-7 text-[var(--creed-text-secondary)]">
-            Paste the server URL into any MCP agent, then authorize Creed in the
-            browser.
+            {connectionMode === "mcp"
+              ? "Paste the server URL into any MCP agent, then authorize Creed in the browser."
+              : "Run Creed CLI from any terminal, then authorize the same Creed OAuth screen in your browser."}
           </p>
         </div>
 
         <div className="mt-5 grid items-start gap-4 lg:grid-cols-2">
-          <div className="flex h-auto flex-col self-start rounded-xl border border-[var(--creed-border)] bg-[var(--creed-surface)] p-4 md:p-5">
-            <div className="flex items-start justify-between gap-4">
+          <div
+            className={cn(
+              "relative flex h-auto flex-col self-start rounded-xl border bg-[var(--creed-surface)] p-4 transition-colors duration-160 md:p-5",
+              connectionMode === "mcp"
+                ? "border-[var(--creed-border-strong)] bg-[var(--creed-surface-raised)]/35"
+                : "border-[var(--creed-border)] hover:border-[var(--creed-border-strong)]",
+            )}
+          >
+            <button
+              type="button"
+              aria-label="Show MCP setup"
+              aria-pressed={connectionMode === "mcp"}
+              onClick={() => setConnectionMode("mcp")}
+              className="absolute inset-0 z-0 cursor-pointer rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--creed-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--creed-surface)]"
+            />
+            <div className="pointer-events-none relative z-10 flex items-start justify-between gap-4">
               <div className="flex items-center gap-3">
                 {/* MCP glyph recoloured by the cycling palette: the asset is a
                   monochrome svg, so we mask the cycling background to its
@@ -152,7 +191,7 @@ export function ConnectionsScreen() {
                     <span>{mcpStatusLabel}</span>
                     {showMcpStack ? (
                       <AgentIconStack
-                        agents={state.mcpClients}
+                        agents={mcpAgentClients}
                         variant="inline"
                         className="gap-1.5"
                         itemClassName="h-4 w-4"
@@ -164,16 +203,19 @@ export function ConnectionsScreen() {
               </div>
             </div>
 
-            <div className="mt-4 w-fit max-w-full self-start rounded-[var(--radius-md)] border border-[var(--creed-border)] px-3 py-2 font-mono text-[13px] text-[var(--creed-text-primary)]">
+            <div className="pointer-events-none relative z-10 mt-4 w-fit max-w-full self-start rounded-[var(--radius-md)] border border-[var(--creed-border)] px-3 py-2 font-mono text-[13px] text-[var(--creed-text-primary)]">
               <span className="block break-all">{state.mcpUrl}</span>
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="relative z-10 mt-4 flex flex-wrap items-center gap-3">
               <AnimatedIconButton
                 icon={CopyIcon}
                 showIcon={copied !== "mcp-url"}
                 className="creed-copy-cycle min-w-[116px] justify-center rounded-md px-4 text-white"
-                onClick={() => copyValue("mcp-url", state.mcpUrl)}
+                onClick={() => {
+                  setConnectionMode("mcp");
+                  void copyValue("mcp-url", state.mcpUrl);
+                }}
               >
                 {copied === "mcp-url" ? (
                   <>
@@ -187,23 +229,30 @@ export function ConnectionsScreen() {
               <Button
                 variant="ghost"
                 className="rounded-md text-[var(--creed-text-secondary)] hover:text-[var(--creed-text-primary)]"
-                onClick={() => setSetupOpen((current) => !current)}
+                onClick={() => {
+                  setConnectionMode("mcp");
+                  setSetupOpen((current) => !current);
+                }}
               >
-                <span className="sm:hidden">{setupOpen ? "Hide" : "Show"}</span>
+                <span className="sm:hidden">
+                  {setupOpen && connectionMode === "mcp" ? "Hide" : "Show"}
+                </span>
                 <span className="hidden sm:inline">
-                  {setupOpen ? "Hide instructions" : "Show instructions"}
+                  {setupOpen && connectionMode === "mcp"
+                    ? "Hide instructions"
+                    : "Show instructions"}
                 </span>
               </Button>
             </div>
 
             <AnimatePresence initial={false}>
-              {setupOpen ? (
+              {setupOpen && connectionMode === "mcp" ? (
                 <motion.div
                   initial={{ height: 0, opacity: 0, y: -8 }}
                   animate={{ height: "auto", opacity: 1, y: 0 }}
                   exit={{ height: 0, opacity: 0, y: -8 }}
                   transition={{ duration: 0.2, ease: "easeOut" }}
-                  className="overflow-hidden"
+                  className="pointer-events-none relative z-10 overflow-hidden"
                 >
                   <ol className="mt-5 grid items-start gap-4 border-t border-[var(--creed-border)] pt-5">
                     {SETUP_STEPS.map((step, index) => (
@@ -222,12 +271,22 @@ export function ConnectionsScreen() {
             </AnimatePresence>
           </div>
 
-          {/* CLI setup card: announced ahead of launch, so the actions render in
-            a disabled state until the CLI connection type ships. */}
-          {/* Whole card sits at half opacity with pointer events off - one
-              clear "not live yet" signal instead of piecemeal greyed bits. */}
-          <div className="pointer-events-none flex h-auto select-none flex-col self-start rounded-xl border border-[var(--creed-border)] bg-[var(--creed-surface)] p-4 opacity-50 md:p-5">
-            <div className="flex items-start justify-between gap-4">
+          <div
+            className={cn(
+              "relative flex h-auto flex-col self-start rounded-xl border bg-[var(--creed-surface)] p-4 transition-colors duration-160 md:p-5",
+              connectionMode === "cli"
+                ? "border-[var(--creed-border-strong)] bg-[var(--creed-surface-raised)]/35"
+                : "border-[var(--creed-border)] hover:border-[var(--creed-border-strong)]",
+            )}
+          >
+            <button
+              type="button"
+              aria-label="Show CLI setup"
+              aria-pressed={connectionMode === "cli"}
+              onClick={() => setConnectionMode("cli")}
+              className="absolute inset-0 z-0 cursor-pointer rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--creed-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--creed-surface)]"
+            />
+            <div className="pointer-events-none relative z-10 flex items-start justify-between gap-4">
               <div className="flex items-center gap-3">
                 <span
                   aria-hidden
@@ -248,34 +307,86 @@ export function ConnectionsScreen() {
                     CLI
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-[13px] text-[var(--creed-text-secondary)]">
-                    <span className="h-2 w-2 rounded-[3px] bg-[var(--creed-border-strong)]" />
-                    <span>Coming soon</span>
+                    <span
+                      className={cn(
+                        "h-2 w-2 rounded-[3px]",
+                        cliConnected
+                          ? "bg-[#16A34A]"
+                          : "bg-[var(--creed-border-strong)]",
+                      )}
+                    />
+                    <span>{cliConnected ? "Connected" : "Ready"}</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="mt-4 w-fit max-w-full self-start rounded-[var(--radius-md)] border border-[var(--creed-border)] px-3 py-2 font-mono text-[13px] text-[var(--creed-text-primary)]">
-              <span className="block break-all">coming soon : )</span>
+            <div className="pointer-events-none relative z-10 mt-4 w-fit max-w-full self-start rounded-[var(--radius-md)] border border-[var(--creed-border)] px-3 py-2 font-mono text-[13px] text-[var(--creed-text-primary)]">
+              <span className="block break-all">npx creed-cli</span>
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="relative z-10 mt-4 flex flex-wrap items-center gap-3">
               <AnimatedIconButton
                 icon={CopyIcon}
-                disabled
+                showIcon={copied !== "cli-command"}
                 className="creed-copy-cycle min-w-[116px] justify-center rounded-md px-4 text-white"
+                onClick={() => {
+                  setConnectionMode("cli");
+                  void copyValue("cli-command", "npx creed-cli");
+                }}
               >
-                Copy command
+                {copied === "cli-command" ? (
+                  <>
+                    <AnimatedCheckmark className="h-4 w-4" size={16} />
+                    Copied
+                  </>
+                ) : (
+                  "Copy command"
+                )}
               </AnimatedIconButton>
               <Button
                 variant="ghost"
-                disabled
                 className="rounded-md text-[var(--creed-text-secondary)]"
+                onClick={() => {
+                  setConnectionMode("cli");
+                  setSetupOpen((current) => !current);
+                }}
               >
-                <span className="sm:hidden">Show</span>
-                <span className="hidden sm:inline">Show instructions</span>
+                <span className="sm:hidden">
+                  {setupOpen && connectionMode === "cli" ? "Hide" : "Show"}
+                </span>
+                <span className="hidden sm:inline">
+                  {setupOpen && connectionMode === "cli"
+                    ? "Hide instructions"
+                    : "Show instructions"}
+                </span>
               </Button>
             </div>
+
+            <AnimatePresence initial={false}>
+              {setupOpen && connectionMode === "cli" ? (
+                <motion.div
+                  initial={{ height: 0, opacity: 0, y: -8 }}
+                  animate={{ height: "auto", opacity: 1, y: 0 }}
+                  exit={{ height: 0, opacity: 0, y: -8 }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                  className="pointer-events-none relative z-10 overflow-hidden"
+                >
+                  <ol className="mt-5 grid items-start gap-4 border-t border-[var(--creed-border)] pt-5">
+                    {CLI_SETUP_STEPS.map((step, index) => (
+                      <li key={step.title}>
+                        <div className="text-[14px] font-medium text-[var(--creed-text-primary)]">
+                          {index + 1}. {step.title}
+                        </div>
+                        <p className="mt-1 text-[13px] leading-6 text-[var(--creed-text-secondary)]">
+                          {step.detail}
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
           </div>
         </div>
 
@@ -285,7 +396,9 @@ export function ConnectionsScreen() {
               Agents
             </h2>
             <p className="mt-2 text-[14px] leading-7 text-[var(--creed-text-secondary)]">
-              Every agent Creed supports and its connection status.
+              {connectionMode === "mcp"
+                ? "Every agent Creed supports and its MCP connection status."
+                : "Use Creed CLI with any agent from the same terminal workflow."}
             </p>
           </div>
           <Dropdown
@@ -306,23 +419,31 @@ export function ConnectionsScreen() {
           {visibleConnections.map((connection) => {
             const { isConnected, lastSeen } = resolveConnectionStatus(
               connection,
-              state.mcpClients,
+              mcpAgentClients,
             );
+            const cardConnected = connectionMode === "cli"
+              ? cliConnected
+              : isConnected;
+            const cardLastSeen = connectionMode === "mcp"
+              ? lastSeen
+              : undefined;
             return (
               <ConnectionCard
                 key={connection.id}
                 connection={connection}
                 mcpUrl={state.mcpUrl}
-                isConnected={isConnected}
-                lastSeen={lastSeen}
-                onRevoke={() => revokeAgent(connection.icon)}
-                onLogs={() => openLogs(connection.icon)}
+                isConnected={cardConnected}
+                lastSeen={cardLastSeen}
+                mode={connectionMode}
+                showMenu
+                onRevoke={connectionMode === "mcp" ? () => revokeAgent(connection.icon) : undefined}
+                onLogs={connectionMode === "mcp" ? () => openLogs(connection.icon) : undefined}
               />
             );
           })}
         </div>
 
-        <McpHealthDashboard />
+        {connectionMode === "mcp" ? <McpHealthDashboard /> : null}
       </div>
     </div>
   );

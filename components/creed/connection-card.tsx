@@ -30,7 +30,10 @@ import {
   AnimatedMenuIconItem,
 } from "@/components/creed/animated-icon-action";
 import { IntegrationGlyph } from "@/components/creed/brand";
-import { getConnectionPresentation } from "@/lib/connection-actions";
+import {
+  getCliConnectionPresentation,
+  getConnectionPresentation,
+} from "@/lib/connection-actions";
 import type {
   ConnectionAction,
   ConnectionItem,
@@ -143,6 +146,8 @@ export function ConnectionCard({
   lastSeen,
   onRevoke,
   onLogs,
+  mode = "mcp",
+  showMenu = false,
 }: {
   connection: ConnectionItem;
   mcpUrl: string;
@@ -153,6 +158,8 @@ export function ConnectionCard({
   onRevoke?: () => Promise<void>;
   // Jump to the Health section filtered to this agent.
   onLogs?: () => void;
+  mode?: "mcp" | "cli";
+  showMenu?: boolean;
 }) {
   // Which button is showing its "Copied"/"Added" flash; primary and secondary
   // flash independently.
@@ -196,7 +203,9 @@ export function ConnectionCard({
   // Buttons and hint are derived client-side from the agent id + MCP URL (see
   // lib/connection-actions.ts for why they don't ride the server payload),
   // with the server definition as fallback and a plain Copy URL as the floor.
-  const presentation = getConnectionPresentation(connection.id, mcpUrl);
+  const presentation = mode === "cli"
+    ? getCliConnectionPresentation(connection.name)
+    : getConnectionPresentation(connection.id, mcpUrl);
   const primaryAction: ConnectionAction = presentation.primary ??
     connection.primaryAction ?? {
       kind: "copy",
@@ -294,8 +303,16 @@ export function ConnectionCard({
                     : "bg-[var(--creed-border-strong)]",
                 )}
               />
-              <span>{isConnected ? "Connected via MCP" : "Not connected"}</span>
-              {isConnected && lastSeen ? (
+              <span>
+                {mode === "cli"
+                  ? isConnected
+                    ? "CLI ready"
+                    : "Authorize on first run"
+                  : isConnected
+                    ? "Connected via MCP"
+                    : "Not connected"}
+              </span>
+              {mode === "mcp" && isConnected && lastSeen ? (
                 <>
                   <span>·</span>
                   <span>Last seen {compactLastSeen(lastSeen)}</span>
@@ -305,7 +322,7 @@ export function ConnectionCard({
           </div>
         </div>
 
-        {onRevoke ? (
+        {showMenu || onRevoke ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -340,7 +357,9 @@ export function ConnectionCard({
                 className="text-sm"
                 onSelect={() => {
                   window.open(
-                    `/docs#${AGENT_DOCS_ANCHORS[connection.id] ?? "connect-mcp"}`,
+                    mode === "cli"
+                      ? "/docs#creed-cli"
+                      : `/docs#${AGENT_DOCS_ANCHORS[connection.id] ?? "connect-mcp"}`,
                     "_blank",
                     "noopener,noreferrer",
                   );
@@ -348,7 +367,7 @@ export function ConnectionCard({
               >
                 Docs
               </AnimatedMenuIconItem>
-              {isConnected ? (
+              {mode === "mcp" && isConnected && onRevoke ? (
                 <>
                   <DropdownMenuSeparator />
                   <AnimatedMenuIconItem
