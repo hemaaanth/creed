@@ -678,7 +678,7 @@ function HeaderDropdown({
               openDelayRef.current = null;
               setPendingOpen(false);
               setOpen(true);
-            }, 240);
+            }, 360);
             return;
           }
           setOpen(true);
