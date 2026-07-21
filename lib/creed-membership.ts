@@ -3,6 +3,7 @@ import type { SupabaseLikeClient } from "@/lib/supabase/types";
 import type { CreedRole, CreedType } from "@/lib/creed-permissions";
 import { deriveCompanyAccessState, type CompanyAccessState } from "@/lib/creed-permissions";
 import { hasActiveEntitlement } from "@/lib/stripe";
+import { isSelfHostedMode } from "@/lib/self-hosted";
 
 // Membership + Creed-listing helpers.
 //
@@ -110,7 +111,7 @@ export async function listUserCreeds(
   // reserved for the personal plan. Company Creeds are always included. Only
   // pay the entitlement read when a personal row is actually present.
   const hasPersonal = mapped.some((c) => c.type === "personal");
-  if (hasPersonal && !(await hasActiveEntitlement(client, userId))) {
+  if (hasPersonal && !isSelfHostedMode() && !(await hasActiveEntitlement(client, userId))) {
     return mapped.filter((c) => c.type !== "personal");
   }
   return mapped;

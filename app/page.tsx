@@ -9,6 +9,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { log } from "@/lib/observability";
+import { isSelfHostedMode } from "@/lib/self-hosted";
 
 export const dynamic = "force-dynamic";
 
@@ -64,11 +65,13 @@ export default async function Home() {
   // then "Get Creed"). Access is either a personal entitlement OR membership of
   // a company Creed whose billing is live - a company member never needs a
   // personal plan.
-  const admin = getSupabaseAdminClient();
-  const [paid, companyAccess] = await Promise.all([
-    hasActiveEntitlement(supabase, user.id),
-    hasCompanyAccess(supabase, admin, user.id),
-  ]);
+  const selfHosted = isSelfHostedMode();
+  const [paid, companyAccess] = selfHosted
+    ? [true, false]
+    : await Promise.all([
+        hasActiveEntitlement(supabase, user.id),
+        hasCompanyAccess(supabase, getSupabaseAdminClient(), user.id),
+      ]);
   if (!paid && !companyAccess) {
     redirect("/onboarding");
   }

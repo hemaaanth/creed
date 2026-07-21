@@ -67,6 +67,9 @@ const withBundleAnalyzer = process.env.ANALYZE === "true"
   : (config: NextConfig) => config;
 
 const nextConfig: NextConfig = {
+  // Produce the minimal Node server artifact used by self-hosted platforms
+  // such as Dokploy. Vercel-compatible deployment behavior is unchanged.
+  output: "standalone",
   // Dev builds to .next-runtime (not .next). CREED_DIST_DIR lets a second dev
   // server (e.g. an agent preview) run from an isolated build dir so it doesn't
   // race the primary dev server's artifacts.

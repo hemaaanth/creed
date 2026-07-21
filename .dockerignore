@@ -1,0 +1,16 @@
+.git
+.next
+.next-runtime
+.next-preview
+.Codex
+.codex
+.claude
+.cursor
+.env
+.env.*
+!.env.example
+node_modules
+coverage
+*.log
+project-context
+supabase/.temp

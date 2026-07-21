@@ -13,6 +13,7 @@ import { listUserCreeds } from "@/lib/creed-membership";
 import { hasActiveEntitlement } from "@/lib/stripe";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { isSelfHostedMode } from "@/lib/self-hosted";
 
 // Creed-branded OAuth consent screen. A signed-in, set-up user sees a single
 // Allow / Deny choice with the connecting client's icon. The page renders only;
@@ -148,7 +149,7 @@ export default async function AuthorizePage({
   // is the bar; onboarding composes via copy-paste, not over MCP. Unpaid users
   // get the same agent-specific consent layout, just with a single "Go to
   // Creed" CTA instead of Allow / Deny.
-  const paid = await hasActiveEntitlement(supabase, user.id);
+  const paid = isSelfHostedMode() || (await hasActiveEntitlement(supabase, user.id));
   if (!paid) {
     return (
       <Shell>

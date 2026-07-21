@@ -5,6 +5,7 @@ import { isSupabaseTableMissingError } from "@/lib/creed-backend-errors";
 import { hasActiveEntitlement } from "@/lib/stripe";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { isSelfHostedMode } from "@/lib/self-hosted";
 
 // Onboarding is free and lives outside the (creed-app) route group. Anyone
 // signed in can run it (answer questions, build with their assistant via a
@@ -32,7 +33,7 @@ export default async function OnboardingPage() {
       redirect("/home");
     }
 
-    paid = await hasActiveEntitlement(supabase, user.id);
+    paid = isSelfHostedMode() || (await hasActiveEntitlement(supabase, user.id));
 
     // loadCreedState is cache()-wrapped, so this reuses the identical call the
     // root layout already made this request. "Composed" == any section last

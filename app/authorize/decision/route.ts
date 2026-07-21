@@ -10,6 +10,7 @@ import {
 import { listUserCreeds } from "@/lib/creed-membership";
 import { hasActiveEntitlement } from "@/lib/stripe";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { isSelfHostedMode } from "@/lib/self-hosted";
 
 // Handles the Allow / Deny POST from the consent screen. The user is
 // re-resolved from the session (never a form field) and the client + redirect
@@ -78,7 +79,7 @@ export async function POST(request: Request) {
   // checks too, but never trust the page). We do NOT require a finished Creed -
   // a paid user can connect before composing content; onboarding itself uses
   // copy-paste, not MCP.
-  const paid = await hasActiveEntitlement(supabase, user.id);
+  const paid = isSelfHostedMode() || (await hasActiveEntitlement(supabase, user.id));
   if (!paid) {
     return badRequest("This account is not set up to connect agents yet.");
   }

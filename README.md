@@ -87,9 +87,57 @@ and copy the printed `whsec_…` into `STRIPE_WEBHOOK_SECRET`. Test payments the
 <summary><b>Deploy your own hosted instance</b></summary>
 
 - Set `NEXT_PUBLIC_SITE_URL` to your deployed origin so OAuth and Stripe redirects resolve.
+- For a free self-hosted instance, set `CREED_SELF_HOSTED=1`. This removes the
+  hosted Stripe entitlement gate while retaining Supabase authentication, RLS,
+  and MCP token verification.
 - Set `CREED_CSP_ENFORCE=1` after watching one deploy cycle in Report-Only mode.
 - Create a live Stripe webhook endpoint at `https://<your-domain>/api/stripe/webhook` and use its signing secret.
 - Example agent prompts referencing `https://creed.md` are illustrative; real URLs derive from your `NEXT_PUBLIC_SITE_URL`.
+
+### Dokploy
+
+This repository includes a production `Dockerfile`. Create a Dokploy
+Application from your fork, use that Dockerfile, expose port `3000`, and add
+your custom domain. Pass the canonical origin as the build argument
+`NEXT_PUBLIC_SITE_URL`, then set the same value again as a runtime environment
+variable. Next.js needs it while building static routes; Creed needs it at
+runtime for OAuth and MCP URLs.
+
+For `https://creed.hem.so`, configure:
+
+```text
+# Build argument and runtime variable
+NEXT_PUBLIC_SITE_URL=https://creed.hem.so
+
+# Runtime variables
+CREED_SELF_HOSTED=1
+NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
+SUPABASE_SECRET_KEY=<service-role-key>
+CREED_ENCRYPTION_SECRET=<32-byte-base64-secret>
+```
+
+Apply the migrations through the Supabase dashboard, CI, or a disposable
+container before the first deployment; no host Supabase CLI installation is
+required. Add `https://creed.hem.so/auth/callback` to Supabase Auth redirect URLs. Add
+the GitHub callback (`/auth/github/callback`) only when you enable the optional
+GitHub sync integration. Stripe, OpenRouter, Resend, and feedback variables
+remain optional for a basic personal deployment.
+
+### Podman-only local verification
+
+Do not run `npm install`, `npm ci`, or Next.js directly on the host. Build the
+Dockerfile with rootless Podman when a local verification is needed; the
+lockfile is installed only in the isolated image build:
+
+```bash
+podman build --target verify \
+  --build-arg NEXT_PUBLIC_SITE_URL=https://creed.hem.so \
+  -t creed:verify .
+```
+
+Run the resulting image with only non-secret test configuration, or inject a
+scoped 1Password Environment into the Podman command for integration testing.
 
 </details>
 

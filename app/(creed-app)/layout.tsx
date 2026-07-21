@@ -16,6 +16,7 @@ import { resolveActiveCreed } from "@/lib/creed-context";
 import { getRequestAuth } from "@/lib/request-auth";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { isSelfHostedMode } from "@/lib/self-hosted";
 
 // Entitlement + onboarding gate for everything inside the (creed-app)
 // route group (/file, /connections, /settings). Three-layer check:
@@ -65,11 +66,13 @@ export default async function CreedAppLayout({ children }: { children: ReactNode
   // Creed whose billing is live. A company member never needs a personal plan
   // (non-negotiable #2). hasCompanyAccess is false for every current user (no
   // company Creeds exist yet), so personal behaviour is unchanged.
-  const admin = getSupabaseAdminClient();
-  const [personalPaid, companyAccess] = await Promise.all([
-    hasActiveEntitlement(supabase, user.id),
-    hasCompanyAccess(supabase, admin, user.id),
-  ]);
+  const selfHosted = isSelfHostedMode();
+  const [personalPaid, companyAccess] = selfHosted
+    ? [true, false]
+    : await Promise.all([
+        hasActiveEntitlement(supabase, user.id),
+        hasCompanyAccess(supabase, getSupabaseAdminClient(), user.id),
+      ]);
 
   if (!personalPaid && !companyAccess) {
     redirect("/onboarding");
@@ -128,7 +131,7 @@ export default async function CreedAppLayout({ children }: { children: ReactNode
     if (activeEntry.role === "owner") {
       ({ showWelcome, paidAt } = await getCompanyWelcomeState(activeEntry.id));
     }
-  } else {
+  } else if (!selfHosted) {
     ({ showWelcome, paidAt } = await getEntitlementWelcomeState(supabase, user.id));
   }
 
