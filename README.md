@@ -98,21 +98,21 @@ and copy the printed `whsec_…` into `STRIPE_WEBHOOK_SECRET`. Test payments the
 
 This repository includes a production `Dockerfile`. Create a Dokploy
 Application from your fork, use that Dockerfile, expose port `3000`, and add
-your custom domain. Pass the canonical origin as the build argument
-`NEXT_PUBLIC_SITE_URL`, then set the same value again as a runtime environment
-variable. Next.js needs it while building static routes; Creed needs it at
-runtime for OAuth and MCP URLs.
+your custom domain. Pass all `NEXT_PUBLIC_*` variables as build arguments, then
+set the same values again as runtime environment variables. Next.js embeds
+public variables into browser code while building; Creed also needs the site
+origin at runtime for OAuth and MCP URLs.
 
 For `https://creed.hem.so`, configure:
 
 ```text
-# Build argument and runtime variable
+# Build arguments and runtime variables
 NEXT_PUBLIC_SITE_URL=https://creed.hem.so
+NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 
 # Runtime variables
 CREED_SELF_HOSTED=1
-NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 SUPABASE_SECRET_KEY=<service-role-key>
 CREED_ENCRYPTION_SECRET=<32-byte-base64-secret>
 ```
@@ -133,6 +133,8 @@ lockfile is installed only in the isolated image build:
 ```bash
 podman build --target verify \
   --build-arg NEXT_PUBLIC_SITE_URL=https://creed.hem.so \
+  --build-arg NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co \
+  --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-key> \
   -t creed:verify .
 ```
 

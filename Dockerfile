@@ -15,11 +15,15 @@ FROM base AS builder
 WORKDIR /app
 
 ARG NEXT_PUBLIC_SITE_URL
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
-# Next.js evaluates public variables while building statically rendered routes.
-# Dokploy must pass `https://creed.hem.so` as this build argument and also set
-# the same variable at runtime for server-rendered OAuth and MCP URLs.
+# Next.js embeds `NEXT_PUBLIC_*` variables into browser code at build time.
+# Dokploy must pass each of these build arguments and also set the same values
+# at runtime for server-rendered routes.
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
