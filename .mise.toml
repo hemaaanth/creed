@@ -1,0 +1,7 @@
+[tasks.dev]
+description = "Run Creed locally in rootless Podman with scoped 1Password secrets"
+run = "./scripts/podman-dev.sh up"
+
+[tasks.dev-down]
+description = "Stop the local Creed Podman development stack"
+run = "./scripts/podman-dev.sh down"

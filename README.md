@@ -152,6 +152,21 @@ npm run lint         # ESLint
 npm run build        # production build
 ```
 
+## Fork-local development
+
+This fork runs local development in rootless Podman. The source worktree is
+mounted directly at `/app`; dependencies and Next's runtime cache live in
+per-worktree named volumes. Secrets come from the scoped 1Password Environment,
+not a plaintext `.env` file.
+
+```bash
+mise run dev
+```
+
+Use `mise run dev-down` to stop it. To run another worktree alongside it, set
+`CREED_DEV_PORT` before invoking `scripts/podman-dev.sh`; the wrapper gives each
+worktree separate volumes automatically.
+
 ## Contributing
 
 PRs welcome. Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) first; it is short and saves us both time. **AI agents**: read [`AGENTS.md`](./AGENTS.md) instead, it is the same information written for you.
